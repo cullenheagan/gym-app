@@ -8,7 +8,9 @@ import { suggest } from "@/lib/suggest";
 import { normName } from "@/lib/history-filter";
 import { workoutNameChips } from "@/lib/workout-names";
 import Home from "./Home";
-import Profile from "./Profile";
+import Settings, { type ThemeChoice } from "./Settings";
+import Avatar from "./Avatar";
+import { avatarKey, avatarPath, clearPending, compressAvatar, dataUrlToBlob, takePending } from "@/lib/avatar";
 import Progress from "./Progress";
 import History, { type RepeatPlan } from "./History";
 import SetupPanel from "./SetupPanel";
@@ -200,7 +202,7 @@ export default function Workout({
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  const [view, setView] = useState<"home" | "log" | "history" | "gyms" | "progress" | "profile">("home");
+  const [view, setView] = useState<"home" | "log" | "history" | "gyms" | "progress" | "settings">("home");
   const [displayName, setDisplayName] = useState(() => {
     try {
       return localStorage.getItem(`name:${userId}`) ?? "";
@@ -221,6 +223,13 @@ export default function Workout({
       return localStorage.getItem("hint:warmup") === "1";
     } catch {
       return false;
+    }
+  });
+  const [avatar, setAvatar] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(avatarKey(userId));
+    } catch {
+      return null;
     }
   });
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -290,17 +299,63 @@ export default function Workout({
 
     let cancelled = false;
     (async () => {
-      let profile = await db.from("profiles").select("unit,display_name").eq("id", userId).maybeSingle();
-      if (profile.error) profile = await db.from("profiles").select("unit").eq("id", userId).maybeSingle();
-      const nm = (profile.data as { display_name?: string | null } | null)?.display_name;
-      if (!cancelled && typeof nm === "string") {
+      // Newer columns may not exist until their migration is run; fall back to what does.
+      let profile: { data: Record<string, unknown> | null } = { data: null };
+      for (const cols of ["unit,display_name,avatar_path", "unit,display_name", "unit"]) {
+        const r = await db.from("profiles").select(cols).eq("id", userId).maybeSingle();
+        if (!r.error) {
+          profile = { data: r.data as Record<string, unknown> | null };
+          break;
+        }
+      }
+      if (!cancelled && profile.data && (profile.data.unit === "lb" || profile.data.unit === "kg")) {
+        setUnit(profile.data.unit as Unit);
+      }
+      let nm = typeof profile.data?.display_name === "string" ? (profile.data.display_name as string) : "";
+      let path = typeof profile.data?.avatar_path === "string" ? (profile.data.avatar_path as string) : "";
+
+      // Details typed on the sign-up form are saved here the first time you sign in.
+      if (profile.data && (!nm || !path)) {
+        const pending = takePending(email);
+        const meta = (await db.auth.getUser()).data.user?.user_metadata as { display_name?: string } | undefined;
+        const patch: Record<string, string> = {};
+        const wantName = nm ? "" : (pending?.name || meta?.display_name || "").trim();
+        if (wantName) patch.display_name = wantName;
+        if (!path && pending?.avatar) {
+          const blob = dataUrlToBlob(pending.avatar);
+          if (blob) {
+            const up = await uploadPhoto(db, avatarPath(userId), blob);
+            if (!up.error) patch.avatar_path = avatarPath(userId);
+            if (!cancelled && !up.error) {
+              setAvatar(pending.avatar);
+              try {
+                localStorage.setItem(avatarKey(userId), pending.avatar);
+              } catch {}
+            }
+          }
+        }
+        if (Object.keys(patch).length > 0) {
+          const upd = await db.from("profiles").update(patch).eq("id", userId);
+          if (!upd.error) {
+            nm = patch.display_name ?? nm;
+            path = patch.avatar_path ?? path;
+            clearPending(email);
+          }
+        } else if (pending) {
+          clearPending(email);
+        }
+      }
+      if (!cancelled && nm) {
         setDisplayName(nm);
         try {
           localStorage.setItem(`name:${userId}`, nm);
         } catch {}
       }
-      if (!cancelled && profile.data && (profile.data.unit === "lb" || profile.data.unit === "kg")) {
-        setUnit(profile.data.unit as Unit);
+      // On a phone that has no saved copy of the photo yet, show it from storage.
+      if (!cancelled && path) {
+        const signed = await db.storage.from("equipment-photos").createSignedUrl(path, 3600);
+        const url = signed.data?.signedUrl;
+        if (url) setAvatar((cur) => cur ?? url);
       }
       const full = await db
         .from("gyms")
@@ -444,17 +499,37 @@ export default function Workout({
     return null;
   }
 
-  function toggleTheme() {
-    const dark =
-      theme === "dark" ||
-      (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    const next = dark ? "light" : "dark";
-    setTheme(next);
-    document.documentElement.setAttribute("data-theme", next);
+  function chooseTheme(t: ThemeChoice) {
+    setTheme(t);
+    if (t === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", t);
     try {
-      localStorage.setItem("theme", next);
+      if (t === "system") localStorage.removeItem("theme");
+      else localStorage.setItem("theme", t);
     } catch {}
   }
+
+  async function savePhoto(file: File): Promise<string | null> {
+    try {
+      const { blob, dataUrl } = await compressAvatar(file);
+      const up = await uploadPhoto(db, avatarPath(userId), blob);
+      if (up.error) return explain(up.error, "Could not save your photo.");
+      const upd = await db.from("profiles").update({ avatar_path: avatarPath(userId) }).eq("id", userId);
+      if (upd.error) {
+        return /avatar_path/.test(upd.error.message)
+          ? "Saving a photo needs migration 0010 in the Supabase SQL Editor first."
+          : explain(upd.error.message, "Could not save your photo.");
+      }
+      setAvatar(dataUrl);
+      try {
+        localStorage.setItem(avatarKey(userId), dataUrl);
+      } catch {}
+      return null;
+    } catch (e) {
+      return explain(e instanceof Error ? e.message : null, "Could not read that photo.");
+    }
+  }
+
 
   async function saveGym() {
     const name = newGym.trim();
@@ -857,54 +932,18 @@ export default function Workout({
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col pb-28">
-      <div className="flex items-center justify-between px-4 pt-4">
+      <div className="flex items-center justify-end px-4 pt-4">
         <button
           type="button"
-          onClick={toggleTheme}
-          aria-label="Switch between light and dark mode"
-          className="flex h-11 w-11 items-center justify-center rounded-full bg-card text-ink shadow-sm"
+          onClick={() => setView("settings")}
+          aria-label="Settings"
+          className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-card shadow-sm"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z" />
-          </svg>
+          <Avatar src={avatar} name={displayName} email={email} size={44} />
         </button>
-        <button
-          type="button"
-          onClick={() => setView("profile")}
-          aria-label="Profile"
-          className="flex h-11 w-11 items-center justify-center rounded-full bg-card text-ink shadow-sm"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="12" cy="8" r="4" />
-            <path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          onClick={handleSignOut}
-          className="h-11 truncate px-3 text-sm font-semibold text-muted"
-          aria-label={`Sign out ${email}`}
-        >
-          Sign out
-        </button>
-        <div className="flex rounded-xl bg-line p-[3px]" role="group" aria-label="Weight unit">
-          {(["lb", "kg"] as Unit[]).map((u) => (
-            <button
-              key={u}
-              type="button"
-              onClick={() => chooseUnit(u)}
-              aria-pressed={unit === u}
-              className={`h-9 min-w-11 rounded-[10px] px-4 text-sm font-bold ${
-                unit === u ? "bg-card text-ink" : "text-muted"
-              }`}
-            >
-              {u}
-            </button>
-          ))}
-        </div>
       </div>
 
-      {view !== "log" && view !== "profile" ? (
+      {view !== "log" && view !== "settings" ? (
         <div className="mx-4 mt-4 flex rounded-xl bg-line p-[3px]" role="group" aria-label="Screen">
           {(["home", "history", "gyms", "progress"] as const).map((v) => (
             <button
@@ -958,7 +997,7 @@ export default function Workout({
           userId={userId}
           unit={unit}
           name={displayName}
-          onProfile={() => setView("profile")}
+          onProfile={() => setView("settings")}
           inProgress={active}
           elapsedMs={now - Date.parse(startedAt)}
           onStart={startWorkout}
@@ -967,7 +1006,20 @@ export default function Workout({
         />
       )}
 
-      {view === "profile" && <Profile email={email} name={displayName} onSave={saveName} />}
+      {view === "settings" && (
+        <Settings
+          email={email}
+          name={displayName}
+          avatar={avatar}
+          theme={theme}
+          unit={unit}
+          onSaveName={saveName}
+          onPhoto={savePhoto}
+          onTheme={chooseTheme}
+          onUnit={chooseUnit}
+          onSignOut={handleSignOut}
+        />
+      )}
 
       {view === "history" && <History db={db} userId={userId} unit={unit} onRepeat={repeatWorkout} />}
 

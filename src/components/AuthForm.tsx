@@ -1,9 +1,14 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { type Avatar as AvatarData, avatarPath, compressAvatar, savePending, avatarKey } from "@/lib/avatar";
+import { uploadPhoto } from "@/lib/photo";
 
 export default function AuthForm({ db }: { db: SupabaseClient }) {
+  const [name, setName] = useState("");
+  const [photo, setPhoto] = useState<AvatarData | null>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"in" | "up">("in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,9 +25,32 @@ export default function AuthForm({ db }: { db: SupabaseClient }) {
       const { error: err } = await db.auth.signInWithPassword({ email, password });
       if (err) setError(err.message);
     } else {
-      const { data, error: err } = await db.auth.signUp({ email, password });
+      const cleanName = name.trim();
+      const { data, error: err } = await db.auth.signUp({
+        email,
+        password,
+        options: { data: cleanName ? { display_name: cleanName } : {} },
+      });
       if (err) setError(err.message);
-      else if (!data.session) setInfo("Check your email for a confirmation link, then sign in.");
+      else if (!data.session) {
+        // No session until the email is confirmed, so keep the name and photo on this phone for the first sign-in.
+        if (cleanName || photo) savePending(email, { name: cleanName, avatar: photo?.dataUrl ?? null });
+        setInfo("Check your email for a confirmation link, then sign in.");
+      } else {
+        const uid = data.session.user.id;
+        const patch: Record<string, string> = {};
+        if (cleanName) patch.display_name = cleanName;
+        if (photo) {
+          const up = await uploadPhoto(db, avatarPath(uid), photo.blob);
+          if (!up.error) {
+            patch.avatar_path = avatarPath(uid);
+            try {
+              localStorage.setItem(avatarKey(uid), photo.dataUrl);
+            } catch {}
+          }
+        }
+        if (Object.keys(patch).length > 0) await db.from("profiles").update(patch).eq("id", uid);
+      }
     }
     setBusy(false);
   }
@@ -35,6 +63,53 @@ export default function AuthForm({ db }: { db: SupabaseClient }) {
       </p>
 
       <form onSubmit={submit} className="mt-6 flex flex-col gap-3 rounded-[20px] bg-card p-4 shadow-sm">
+        {mode === "up" && (
+          <>
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => photoInput.current?.click()}
+                aria-label={photo ? "Change photo" : "Add photo"}
+                className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-field text-sm font-bold text-muted"
+              >
+                {photo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={photo.dataUrl} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  "+ Photo"
+                )}
+              </button>
+              <p className="text-xs font-medium text-muted">Optional. Take a photo or choose one from your library.</p>
+            </div>
+            <input
+              ref={photoInput}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (!f) return;
+                try {
+                  setPhoto(await compressAvatar(f));
+                } catch {
+                  setError("Could not read that photo.");
+                }
+              }}
+            />
+            <label className="text-xs font-bold uppercase tracking-wider text-muted" htmlFor="name">
+              Name
+            </label>
+            <input
+              id="name"
+              maxLength={40}
+              autoComplete="given-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="h-11 rounded-xl border-2 border-transparent bg-field px-3 text-base font-semibold outline-none focus:border-accent"
+            />
+          </>
+        )}
         <label className="text-xs font-bold uppercase tracking-wider text-muted" htmlFor="email">
           Email
         </label>
