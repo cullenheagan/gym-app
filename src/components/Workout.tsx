@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Unit, formatWeight, fromDisplay, toDisplay } from "@/lib/units";
 import { formatClock, formatDate } from "@/lib/format";
 import { suggest } from "@/lib/suggest";
+import { normName } from "@/lib/history-filter";
+import { workoutNameChips } from "@/lib/workout-names";
 import Home from "./Home";
 import Profile from "./Profile";
 import Progress from "./Progress";
@@ -185,6 +187,7 @@ export default function Workout({
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const photoInput = useRef<HTMLInputElement>(null);
+  const titleInput = useRef<HTMLInputElement>(null);
   const existingPhotoInput = useRef<HTMLInputElement>(null);
   const photoTarget = useRef<string | null>(null);
   const [showBreakdown, setShowBreakdown] = useState(false);
@@ -198,6 +201,13 @@ export default function Workout({
       return "";
     }
   });
+  // Suggested names: up to four you have used before (most used first), then the usual splits.
+  const nameChips = useMemo(
+    () => workoutNameChips(readCache<{ name: string }[]>(cacheKey(userId, "home")) ?? []),
+    // Recomputed when the log screen opens so a just-finished workout's name is included.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [userId, view],
+  );
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [pending, setPending] = useState(0);
@@ -931,12 +941,47 @@ export default function Workout({
         <label htmlFor="title" className="sr-only">
           Workout name
         </label>
-        <input
-          id="title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          className="w-full bg-transparent text-[32px] font-extrabold leading-tight tracking-tight outline-none"
-        />
+        <div className="flex items-center gap-2">
+          <input
+            id="title"
+            ref={titleInput}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="min-w-0 flex-1 bg-transparent text-[32px] font-extrabold leading-tight tracking-tight outline-none"
+          />
+          <button
+            type="button"
+            aria-label="Rename workout"
+            onClick={() => {
+              titleInput.current?.focus();
+              titleInput.current?.select();
+            }}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-card text-muted shadow-sm"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" />
+            </svg>
+          </button>
+        </div>
+
+        {exercises.length === 0 && (
+          <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Suggested workout names">
+            {nameChips.map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setTitle(n)}
+                aria-pressed={normName(title) === normName(n)}
+                className={`h-9 rounded-full px-4 text-[13px] font-bold ${
+                  normName(title) === normName(n) ? "bg-accent text-on-accent" : "bg-card text-ink shadow-sm"
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="mt-3 rounded-[20px] bg-accent text-on-accent">
           <button
