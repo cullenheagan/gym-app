@@ -8,6 +8,7 @@ import { suggest } from "@/lib/suggest";
 import { normName } from "@/lib/history-filter";
 import { workoutNameChips } from "@/lib/workout-names";
 import Home from "./Home";
+import GymPicker from "./GymPicker";
 import Settings, { type ThemeChoice } from "./Settings";
 import Avatar from "./Avatar";
 import { avatarKey, avatarPath, clearPending, compressAvatar, dataUrlToBlob, takePending } from "@/lib/avatar";
@@ -188,6 +189,7 @@ export default function Workout({
   const [gymId, setGymId] = useState("");
   const [catalog, setCatalog] = useState<Catalog[]>([]);
   const [addingGym, setAddingGym] = useState(false);
+  const [gymUrls, setGymUrls] = useState<Record<string, string>>({});
   const [newGym, setNewGym] = useState("");
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
@@ -407,6 +409,25 @@ export default function Workout({
       cancelled = true;
     };
   }, [db, userId]);
+
+  // Temporary links to the gym photos, for the gym menu (they live in a private bucket).
+  const gymPhotoKey = allGyms.map((g) => g.photo_path ?? "").join("|");
+  useEffect(() => {
+    const paths = allGyms.map((g) => g.photo_path).filter((p): p is string => !!p);
+    if (paths.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const signed = await db.storage.from("equipment-photos").createSignedUrls(paths, 3600);
+      if (cancelled || !signed.data) return;
+      const map: Record<string, string> = {};
+      for (const row of signed.data) if (row.path && row.signedUrl) map[row.path] = row.signedUrl;
+      setGymUrls((cur) => ({ ...cur, ...map }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, gymPhotoKey]);
 
   // Keep the saved copy of the gym list current when gyms are added, photographed or removed.
   useEffect(() => {
@@ -1161,26 +1182,13 @@ export default function Workout({
               </button>
             </div>
           ) : (
-            <div className="relative">
-              <select
-                id="gym"
-                value={gymId}
-                onChange={(e) => {
-                  if (e.target.value === "__add__") setAddingGym(true);
-                  else setGymId(e.target.value);
-                }}
-                className="h-11 w-full appearance-none rounded-full border border-line bg-card pl-4 pr-12 text-sm font-semibold text-ink"
-              >
-                <option value="">No gym selected</option>
-                {gyms.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-                <option value="__add__">+ Add a gym</option>
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-muted" />
-            </div>
+            <GymPicker
+              gyms={gyms}
+              urls={gymUrls}
+              value={gymId}
+              onChange={setGymId}
+              onAdd={() => setAddingGym(true)}
+            />
           )}
         </div>
       </header>
