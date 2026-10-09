@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Unit, toDisplay } from "@/lib/units";
 import { KINDS, type Kind, kindLabel } from "@/lib/kinds";
+import ActivityCalendar from "./ActivityCalendar";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { formatClock, formatDuration } from "@/lib/format";
 import { type HomeWorkout, templates, weekTotals } from "@/lib/home-stats";
@@ -161,6 +162,8 @@ export default function Home({
         </div>
       </section>
       )}
+
+      {!startOnly && <ActivityCalendar db={db} userId={userId} />}
     </div>
   );
 }
