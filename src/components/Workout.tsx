@@ -208,6 +208,14 @@ export default function Workout({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [userId, view],
   );
+  // The "tap a set number" hint goes away for good once you have marked a warm-up.
+  const [warmupHintSeen, setWarmupHintSeen] = useState(() => {
+    try {
+      return localStorage.getItem("hint:warmup") === "1";
+    } catch {
+      return false;
+    }
+  });
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [pending, setPending] = useState(0);
@@ -639,6 +647,16 @@ export default function Workout({
     closePicker();
     setMessage(photoProblem ? { kind: "error", text: photoProblem } : null);
     addToWorkout(made, [], null);
+  }
+
+  function toggleWarmup(exKey: string, setId: string, warmup: boolean) {
+    updateSet(exKey, setId, { warmup });
+    if (warmup && !warmupHintSeen) {
+      setWarmupHintSeen(true);
+      try {
+        localStorage.setItem("hint:warmup", "1");
+      } catch {}
+    }
   }
 
   function updateSet(exKey: string, setId: string, patch: Partial<SetRow>) {
@@ -1271,6 +1289,11 @@ export default function Workout({
 
             {ex.sets.length > 0 && (
               <div className="mt-2">
+                {!warmupHintSeen && (
+                  <p className="mb-1.5 px-0.5 text-xs font-semibold text-accent">
+                    Tap a set number to mark it as a warm-up
+                  </p>
+                )}
                 <div className="grid grid-cols-[28px_1fr_1fr_1fr_44px_36px] gap-2 px-0.5 text-xs font-bold text-muted">
                   <span>Set</span>
                   <span>Previous</span>
@@ -1290,13 +1313,13 @@ export default function Workout({
                   >
                     <button
                       type="button"
-                      onClick={() => updateSet(ex.key, s.id, { warmup: !s.warmup })}
+                      onClick={() => toggleWarmup(ex.key, s.id, !s.warmup)}
                       aria-label={
                         s.warmup
                           ? "Warm-up set. Tap to make it a working set"
                           : `Working set ${num}. Tap to make it a warm-up`
                       }
-                      className={`h-9 rounded-lg text-base font-bold ${s.warmup ? "text-accent" : ""}`}
+                      className={`h-8 w-7 rounded-full text-base font-bold ${s.warmup ? "bg-accent text-on-accent" : "bg-field"}`}
                     >
                       {s.warmup ? "W" : num}
                     </button>
