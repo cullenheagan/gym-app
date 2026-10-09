@@ -31,39 +31,6 @@ export function level(minutes: number, count: number): 0 | 1 | 2 | 3 | 4 {
   return 4;
 }
 
-// `weeks` columns ending with the current week; each column runs Monday to Sunday.
-export function buildDays(ws: ActivityWorkout[], now: number, weeks: number): Day[][] {
-  const byDay = new Map<string, Day["workouts"]>();
-  for (const w of ws) {
-    const start = new Date(w.started_at);
-    if (Number.isNaN(start.getTime())) continue;
-    const k = dayKey(start);
-    byDay.set(k, [...(byDay.get(k) ?? []), { name: w.name, minutes: workoutMinutes(w) }]);
-  }
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
-  const monday = new Date(today);
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) - (weeks - 1) * 7);
-  const cols: Day[][] = [];
-  for (let c = 0; c < weeks; c++) {
-    const col: Day[] = [];
-    for (let r = 0; r < 7; r++) {
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + c * 7 + r);
-      const list = byDay.get(dayKey(d)) ?? [];
-      col.push({
-        key: dayKey(d),
-        date: d,
-        minutes: list.reduce((s, x) => s + x.minutes, 0),
-        workouts: list,
-        future: d.getTime() > today.getTime(),
-      });
-    }
-    cols.push(col);
-  }
-  return cols;
-}
-
 // Current streak counts back from today (or from yesterday if you have not trained yet today).
 export function streaks(ws: ActivityWorkout[], now: number): { current: number; longest: number } {
   const days = new Set<string>();
@@ -96,4 +63,40 @@ export function streaks(ws: ActivityWorkout[], now: number): { current: number; 
     prev = d;
   }
   return { current, longest };
+}
+
+// One calendar month as rows of seven days (Monday first). Days outside the month are null.
+export function buildMonth(ws: ActivityWorkout[], year: number, month: number, now: number): (Day | null)[][] {
+  const all = buildDaysBetween(ws, new Date(year, month, 1), new Date(year, month + 1, 0), now);
+  const first = (new Date(year, month, 1).getDay() + 6) % 7; // 0 = Monday
+  const cells: (Day | null)[] = [...Array(first).fill(null), ...all];
+  while (cells.length % 7 !== 0) cells.push(null);
+  const rows: (Day | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+  return rows;
+}
+
+function buildDaysBetween(ws: ActivityWorkout[], from: Date, to: Date, now: number): Day[] {
+  const byDay = new Map<string, Day["workouts"]>();
+  for (const w of ws) {
+    const start = new Date(w.started_at);
+    if (Number.isNaN(start.getTime())) continue;
+    const k = dayKey(start);
+    byDay.set(k, [...(byDay.get(k) ?? []), { name: w.name, minutes: workoutMinutes(w) }]);
+  }
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const out: Day[] = [];
+  for (let d = new Date(from); d.getTime() <= to.getTime(); d.setDate(d.getDate() + 1)) {
+    const date = new Date(d);
+    const list = byDay.get(dayKey(date)) ?? [];
+    out.push({
+      key: dayKey(date),
+      date,
+      minutes: list.reduce((sum, x) => sum + x.minutes, 0),
+      workouts: list,
+      future: date.getTime() > today.getTime(),
+    });
+  }
+  return out;
 }

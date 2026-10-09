@@ -1,32 +1,31 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { formatDuration } from "@/lib/format";
-import { type ActivityWorkout, type Day, buildDays, level, streaks } from "@/lib/activity";
+import { type ActivityWorkout, type Day, buildMonth, level, streaks } from "@/lib/activity";
 
 // Shade 1 to 4: how much of the accent color is mixed into the empty-day color.
 const SHADE = [0, 28, 50, 75, 100];
 const shade = (l: number) => (l ? `color-mix(in srgb, var(--accent) ${SHADE[l]}%, var(--field))` : "var(--field)");
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-// A square per day, brighter the longer you trained. 12 weeks by default, a full year on request.
+// One month at a time: each day is a square that gets brighter the longer you trained.
 export default function ActivityCalendar({ db, userId }: { db: SupabaseClient; userId: string }) {
   const ck = cacheKey(userId, "activity");
   const [list, setList] = useState<ActivityWorkout[] | null>(() => readCache<ActivityWorkout[]>(ck));
-  const [year, setYear] = useState(false);
   const [picked, setPicked] = useState<Day | null>(null);
-  const scroller = useRef<HTMLDivElement>(null);
+  const today = new Date();
+  const [ym, setYm] = useState({ y: today.getFullYear(), m: today.getMonth() });
 
   useEffect(() => {
     let live = true;
-    const since = new Date(Date.now() - 380 * 86400000).toISOString();
+    const since = new Date(Date.now() - 1100 * 86400000).toISOString(); // about three years
     db.from("workouts")
       .select("name,started_at,ended_at")
       .gte("started_at", since)
       .order("started_at", { ascending: false })
-      .limit(3000)
+      .limit(5000)
       .then((res: { data: unknown; error: { message: string } | null }) => {
         if (!live || res.error) return;
         const rows = (res.data ?? []) as ActivityWorkout[];
@@ -39,69 +38,75 @@ export default function ActivityCalendar({ db, userId }: { db: SupabaseClient; u
   }, [db, ck]);
 
   const now = Date.now();
-  const weeks = year ? 53 : 12;
-  const cols = useMemo(() => buildDays(list ?? [], now, weeks), [list, weeks]); // eslint-disable-line react-hooks/exhaustive-deps
+  const rows = useMemo(() => buildMonth(list ?? [], ym.y, ym.m, now), [list, ym]); // eslint-disable-line react-hooks/exhaustive-deps
   const st = useMemo(() => streaks(list ?? [], now), [list]); // eslint-disable-line react-hooks/exhaustive-deps
-  const cell = year ? 12 : 22;
-  const gap = year ? 3 : 4;
+  const atCurrent = ym.y === today.getFullYear() && ym.m === today.getMonth();
+  const monthName = new Date(ym.y, ym.m, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const monthDays = rows.flat().filter((d): d is Day => !!d);
+  const monthWorkouts = monthDays.reduce((n, d) => n + d.workouts.length, 0);
+  const activeDays = monthDays.filter((d) => d.workouts.length > 0).length;
 
-  // The year view is wider than the screen; start at the most recent weeks.
-  useEffect(() => {
-    if (year && scroller.current) scroller.current.scrollLeft = scroller.current.scrollWidth;
-  }, [year]);
+  function go(delta: number) {
+    const d = new Date(ym.y, ym.m + delta, 1);
+    setYm({ y: d.getFullYear(), m: d.getMonth() });
+    setPicked(null);
+  }
 
-  const label = (c: number) => {
-    const first = cols[c][0].date;
-    return c === 0 || first.getMonth() !== cols[c - 1][0].date.getMonth() ? MONTHS[first.getMonth()] : "";
-  };
+  const arrow = "flex h-9 w-9 items-center justify-center rounded-full bg-field text-ink disabled:opacity-30";
 
   return (
     <section className="mt-6">
-      <div className="flex items-baseline justify-between px-1">
-        <h3 className="text-sm font-extrabold">Activity</h3>
-        <button type="button" onClick={() => setYear((y) => !y)} className="text-[13px] font-bold text-accent">
-          {year ? "Last 12 weeks" : "Show full year"}
-        </button>
-      </div>
+      <h3 className="px-1 text-sm font-extrabold">Activity</h3>
       <div className="mt-2 rounded-[20px] bg-card p-4 shadow-sm">
-        <div ref={scroller} className={year ? "overflow-x-auto" : ""}>
-          <div className="flex" style={{ gap }}>
-            <div className="flex flex-col text-[10px] font-semibold text-muted" style={{ gap, paddingTop: 14 }}>
-              {["M", "", "W", "", "F", "", ""].map((d, i) => (
-                <span key={i} style={{ height: cell, lineHeight: `${cell}px`, width: 10 }}>
-                  {d}
-                </span>
-              ))}
+        <div className="flex items-center justify-between">
+          <button type="button" onClick={() => go(-1)} aria-label="Previous month" className={arrow}>
+            {"‹"}
+          </button>
+          <div className="text-center">
+            <div className="text-[15px] font-extrabold">{monthName}</div>
+            <div className="text-xs text-muted">
+              {activeDays} {activeDays === 1 ? "day" : "days"} · {monthWorkouts} {monthWorkouts === 1 ? "workout" : "workouts"}
             </div>
-            {cols.map((col, c) => (
-              <div key={c} className="flex flex-col" style={{ gap }}>
-                <span className="h-[10px] whitespace-nowrap text-[10px] font-semibold text-muted" style={{ marginBottom: 4 }}>
-                  {label(c)}
-                </span>
-                {col.map((d) => {
-                  const lv = d.future ? 0 : level(d.minutes, d.workouts.length);
-                  return (
-                    <button
-                      key={d.key}
-                      type="button"
-                      disabled={d.future}
-                      onClick={() => setPicked(picked?.key === d.key ? null : d)}
-                      aria-label={`${d.date.toDateString()}: ${d.workouts.length} ${d.workouts.length === 1 ? "workout" : "workouts"}`}
-                      className="rounded-[5px]"
-                      style={{
-                        backgroundColor: shade(lv),
-                        width: cell,
-                        height: cell,
-                        opacity: d.future ? 0.35 : 1,
-                        outline: picked?.key === d.key ? "2px solid var(--text)" : "none",
-                        outlineOffset: 1,
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            ))}
           </div>
+          <button type="button" onClick={() => go(1)} disabled={atCurrent} aria-label="Next month" className={arrow}>
+            {"›"}
+          </button>
+        </div>
+
+        <div className="mt-3 grid grid-cols-7 gap-1.5 text-center text-[11px] font-semibold text-muted">
+          {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
+            <span key={i}>{d}</span>
+          ))}
+        </div>
+        <div className="mt-1.5 flex flex-col gap-1.5">
+          {rows.map((row, r) => (
+            <div key={r} className="grid grid-cols-7 gap-1.5">
+              {row.map((d, c) =>
+                d ? (
+                  <button
+                    key={c}
+                    type="button"
+                    disabled={d.future}
+                    onClick={() => setPicked(picked?.key === d.key ? null : d)}
+                    aria-label={`${d.date.toDateString()}: ${d.workouts.length} ${d.workouts.length === 1 ? "workout" : "workouts"}`}
+                    className={`aspect-square rounded-[10px] text-[13px] font-bold ${
+                      level(d.minutes, d.workouts.length) >= 3 ? "text-on-accent" : "text-ink"
+                    }`}
+                    style={{
+                      backgroundColor: shade(d.future ? 0 : level(d.minutes, d.workouts.length)),
+                      opacity: d.future ? 0.4 : 1,
+                      outline: picked?.key === d.key ? "2px solid var(--text)" : "none",
+                      outlineOffset: 1,
+                    }}
+                  >
+                    {d.date.getDate()}
+                  </button>
+                ) : (
+                  <span key={c} />
+                ),
+              )}
+            </div>
+          ))}
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-3 text-[11px] font-semibold text-muted">
@@ -111,11 +116,7 @@ export default function ActivityCalendar({ db, userId }: { db: SupabaseClient; u
           <span className="flex items-center gap-1">
             Less
             {[0, 1, 2, 3, 4].map((l) => (
-              <span
-                key={l}
-                className="inline-block h-3 w-3 rounded-[3px]"
-                style={{ backgroundColor: shade(l) }}
-              />
+              <span key={l} className="inline-block h-3 w-3 rounded-[3px]" style={{ backgroundColor: shade(l) }} />
             ))}
             More
           </span>
