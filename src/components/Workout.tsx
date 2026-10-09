@@ -238,7 +238,7 @@ export default function Workout({
   // An empty workout counts as in progress from the moment Start workout is tapped.
   const [workoutStarted, setWorkoutStarted] = useState(false);
   // The Train sub-tab to come back to when the Train button is tapped.
-  const [trainTab, setTrainTab] = useState<"history" | "gyms" | "progress">("history");
+  const [trainTab, setTrainTab] = useState<"log" | "history" | "gyms" | "progress">("log");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [pending, setPending] = useState(0);
@@ -279,6 +279,7 @@ export default function Workout({
   // The workout clock ticks while there is something in the workout.
   const active = exercises.length > 0;
   const inProgress = active || workoutStarted;
+  const logOpen = view === "log" && inProgress;
   useEffect(() => {
     if (!active) return;
     setNow(Date.now());
@@ -975,14 +976,14 @@ export default function Workout({
 
       {(view === "log" || view === "history" || view === "gyms" || view === "progress") && (
         <div className="mx-4 mt-4 flex rounded-xl bg-line p-[3px]" role="group" aria-label="Train">
-          {([...(inProgress || view === "log" ? (["log"] as const) : []), "history", "gyms", "progress"] as const).map(
+          {(["log", "history", "gyms", "progress"] as const).map(
             (v) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => {
                   setView(v);
-                  if (v !== "log") setTrainTab(v);
+                  setTrainTab(v);
                 }}
                 aria-pressed={view === v}
                 className={`flex h-10 flex-1 items-center justify-center gap-1.5 rounded-[10px] text-sm font-bold ${
@@ -1012,6 +1013,24 @@ export default function Workout({
               {syncing ? "Syncing..." : "Sync now"}
             </button>
           )}
+        </div>
+      )}
+
+      {view === "log" && !inProgress && (
+        <div>
+          <Home
+            db={db}
+            userId={userId}
+            unit={unit}
+            name={displayName}
+            onProfile={() => setView("settings")}
+            inProgress={false}
+            elapsedMs={0}
+            onStart={startWorkout}
+            onResume={() => setView("log")}
+            onTemplate={repeatWorkout}
+            startOnly
+          />
         </div>
       )}
 
@@ -1068,7 +1087,7 @@ export default function Workout({
         />
       )}
 
-      <header className={view === "log" ? "px-5 pt-4" : "hidden"}>
+      <header className={logOpen ? "px-5 pt-4" : "hidden"}>
         <label htmlFor="title" className="sr-only">
           Workout name
         </label>
@@ -1202,7 +1221,7 @@ export default function Workout({
         </div>
       </header>
 
-      <div className={view === "log" ? "mt-4 flex flex-col gap-3 px-4" : "hidden"}>
+      <div className={logOpen ? "mt-4 flex flex-col gap-3 px-4" : "hidden"}>
         {picking && (
           <section className="rounded-[20px] bg-card p-4 shadow-sm" aria-label="Add exercise">
             <label htmlFor="exercise-search" className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-muted">
@@ -1540,7 +1559,7 @@ export default function Workout({
 
       <nav
         className={`fixed inset-x-4 bottom-[88px] mx-auto max-w-md items-center gap-2 rounded-full bg-ink p-2 shadow-lg ${
-          view === "log" ? "flex" : "hidden"
+          logOpen ? "flex" : "hidden"
         }`}
         aria-label="Workout actions"
       >

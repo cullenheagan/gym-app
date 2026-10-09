@@ -29,6 +29,7 @@ export default function Home({
   onStart,
   onResume,
   onTemplate,
+  startOnly = false,
 }: {
   db: SupabaseClient;
   userId: string;
@@ -40,6 +41,7 @@ export default function Home({
   onStart: () => void;
   onResume: () => void;
   onTemplate: (plan: RepeatPlan) => void;
+  startOnly?: boolean; // the Train > Workout screen: just the start button and shortcuts
 }) {
   const ck = cacheKey(userId, "home");
   const [list, setList] = useState<HomeWorkout<RepeatPlan>[] | null>(() => {
@@ -69,7 +71,7 @@ export default function Home({
 
   return (
     <div className="px-4 pb-8 pt-4">
-      {name ? (
+      {startOnly ? null : name ? (
         <h2 className="px-1 text-[32px] font-extrabold leading-tight tracking-tight">Hi, {name}</h2>
       ) : (
         <>
@@ -83,7 +85,7 @@ export default function Home({
       <button
         type="button"
         onClick={inProgress ? onResume : onStart}
-        className="mt-4 w-full rounded-[20px] bg-accent p-5 text-left text-on-accent"
+        className={`${startOnly ? "mt-0" : "mt-4"} w-full rounded-[20px] bg-accent p-5 text-left text-on-accent`}
       >
         <span className="block text-xl font-extrabold">{inProgress ? "Resume workout" : "Start workout"}</span>
         <span className="mt-0.5 block text-sm font-semibold opacity-90">
@@ -112,6 +114,7 @@ export default function Home({
         </section>
       )}
 
+      {!startOnly && (
       <section className="mt-6">
         <h3 className="px-1 text-sm font-extrabold">This week</h3>
         <div className="mt-2 grid grid-cols-2 gap-2 rounded-[20px] bg-card p-4 shadow-sm">
@@ -128,6 +131,7 @@ export default function Home({
           </div>
         </div>
       </section>
+      )}
     </div>
   );
 }
