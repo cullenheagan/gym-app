@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/* Design tokens: the "Clean" look. Light by default, dark via data-theme or system. */
+:root {
+  --bg: #f3f4f6;
+  --card: #ffffff;
+  --field: #f1f3f5;
+  --text: #12141a;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --accent: #2457f5;
+  --accent-tint: #e8eeff;
+  --done: #16a34a;
+  --on-accent: #ffffff;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0e1014;
+  --card: #181b21;
+  --field: #232730;
+  --text: #f3f4f6;
+  --muted: #9aa1ad;
+  --border: #2a2e37;
+  --accent: #5b83ff;
+  --accent-tint: #1b2745;
+  --done: #34c77b;
+  --on-accent: #0e1014;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --bg: #0e1014;
+    --card: #181b21;
+    --field: #232730;
+    --text: #f3f4f6;
+    --muted: #9aa1ad;
+    --border: #2a2e37;
+    --accent: #5b83ff;
+    --accent-tint: #1b2745;
+    --done: #34c77b;
+    --on-accent: #0e1014;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-field: var(--field);
+  --color-ink: var(--text);
+  --color-muted: var(--muted);
+  --color-line: var(--border);
+  --color-accent: var(--accent);
+  --color-tint: var(--accent-tint);
+  --color-done: var(--done);
+  --color-on-accent: var(--on-accent);
+  --font-sans: var(--font-manrope), system-ui, sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-manrope), system-ui, sans-serif;
+}
+
+input {
+  font-family: inherit;
+}
