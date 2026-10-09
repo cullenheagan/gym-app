@@ -22,12 +22,13 @@ export type RepeatPlan = {
     exerciseId: string;
     name: string;
     setupId: string | null;
-    sets: { kg: number | null; reps: number | null }[];
+    sets: { kg: number | null; reps: number | null; warmup?: boolean }[];
   }[];
 };
 type RawSet = {
   id: string;
   set_index: number;
+  set_type?: string | null;
   weight_kg: number | null;
   reps: number | null;
   completed_at: string | null;
@@ -97,9 +98,10 @@ export function summarize(w: RawWorkout) {
     };
   });
 
-  const volumeKg = w.workout_sets.reduce((sum, s) => sum + Number(s.weight_kg ?? 0) * (s.reps ?? 0), 0);
+  const working = w.workout_sets.filter((s) => s.set_type !== "warmup");
+  const volumeKg = working.reduce((sum, s) => sum + Number(s.weight_kg ?? 0) * (s.reps ?? 0), 0);
   const total = w.ended_at ? Math.max(0, ms(w.ended_at) - ms(w.started_at)) : null;
-  return { exercises, volumeKg, setCount: w.workout_sets.length, total };
+  return { exercises, volumeKg, setCount: working.length, total };
 }
 
 export function toPlan(w: RawWorkout, sum: ReturnType<typeof summarize>): RepeatPlan {
@@ -116,6 +118,7 @@ export function toPlan(w: RawWorkout, sum: ReturnType<typeof summarize>): Repeat
         sets: ex.sets.map((s) => ({
           kg: s.weight_kg == null ? null : Number(s.weight_kg),
           reps: s.reps,
+          warmup: s.set_type === "warmup" || undefined,
         })),
       })),
   };
@@ -196,7 +199,7 @@ export default function History({
       const res = await db
         .from("workouts")
         .select(
-          "id,name,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,weight_kg,reps,completed_at,setup_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))",
+          "id,name,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,set_type,weight_kg,reps,completed_at,setup_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))",
         )
         .order("started_at", { ascending: false })
         .limit(200);
@@ -402,7 +405,10 @@ export default function History({
                       )}
                       <p className="mt-0.5 pl-5 text-[13px] font-medium text-muted">
                         {ex.sets
-                          .map((s) => `${formatWeight(Number(s.weight_kg ?? 0), unit)} × ${s.reps ?? 0}`)
+                          .map(
+                            (s) =>
+                              `${s.set_type === "warmup" ? "W " : ""}${formatWeight(Number(s.weight_kg ?? 0), unit)} × ${s.reps ?? 0}`,
+                          )
                           .join(", ")}
                       </p>
                     </li>

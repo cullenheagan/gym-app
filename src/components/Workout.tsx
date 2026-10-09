@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Unit, formatWeight, fromDisplay, toDisplay } from "@/lib/units";
 import { formatClock, formatDate } from "@/lib/format";
+import { suggest } from "@/lib/suggest";
 import Home from "./Home";
 import Profile from "./Profile";
 import Progress from "./Progress";
@@ -25,6 +26,7 @@ type SetRow = {
   reps: number | null;
   done: boolean;
   doneAt: string | null; // when the set was marked done
+  warmup?: boolean; // warm-up sets are saved but left out of totals, progress and suggestions
 };
 
 type Exercise = {
@@ -33,6 +35,7 @@ type Exercise = {
   exerciseId: string | null; // null only for drafts saved before exercises were picked from a list
   prevDate: string | null; // when this exercise was last logged
   setupId?: string | null; // bench / seat setup used (optional; older drafts lack it)
+  suggestion?: { kg: number; reps: number; hit: boolean; lastKg: number } | null;
   sets: SetRow[];
 };
 
@@ -47,6 +50,7 @@ type PastSet = {
   reps: number | null;
   completed_at: string | null;
   setup_id: string | null;
+  set_type?: string | null;
 };
 
 const newId = () => crypto.randomUUID();
@@ -69,6 +73,9 @@ function Thumb({ url, size = 40 }: { url?: string; size?: number }) {
     />
   );
 }
+
+// Smallest jump offered when suggesting a heavier weight: 5 lb or 2.5 kg, in kg.
+const stepKg = (unit: Unit) => (unit === "kg" ? 2.5 : 5 / 2.20462262);
 
 function CheckIcon() {
   return (
@@ -102,7 +109,7 @@ function pendingPrevious(userId: string, exerciseId: string): Previous | null {
   const workoutId = best.workout_id;
   const sets: PastSet[] = loadOutbox(userId)
     .flatMap((i) => i.sets)
-    .filter((st) => st.workout_id === workoutId && st.exercise_id === exerciseId)
+    .filter((st) => st.workout_id === workoutId && st.exercise_id === exerciseId && st.set_type !== "warmup")
     .map((st) => ({
       workout_id: st.workout_id,
       set_index: st.set_index,
@@ -110,6 +117,7 @@ function pendingPrevious(userId: string, exerciseId: string): Previous | null {
       reps: st.reps,
       completed_at: st.completed_at,
       setup_id: st.setup_id,
+      set_type: st.set_type,
     }))
     .sort((x, y) => x.set_index - y.set_index);
   return { sets, date: best.completed_at, setupId: best.setup_id };
@@ -122,7 +130,7 @@ async function loadPrevious(db: SupabaseClient, userId: string, exerciseId: stri
   let result: Previous = { sets: [], date: null, setupId: null };
   const { data, error } = await db
     .from("workout_sets")
-    .select("workout_id,set_index,weight_kg,reps,completed_at,setup_id")
+    .select("workout_id,set_index,weight_kg,reps,completed_at,setup_id,set_type")
     .eq("exercise_id", exerciseId)
     .not("completed_at", "is", null)
     .order("completed_at", { ascending: false })
@@ -134,7 +142,7 @@ async function loadPrevious(db: SupabaseClient, userId: string, exerciseId: stri
     const last = rows[0].workout_id;
     result = {
       sets: rows
-        .filter((r: PastSet) => r.workout_id === last)
+        .filter((r: PastSet) => r.workout_id === last && r.set_type !== "warmup")
         .sort((a: PastSet, b: PastSet) => a.set_index - b.set_index),
       date: rows[0].completed_at,
       setupId: rows[0].setup_id,
@@ -503,6 +511,10 @@ export default function Workout({
       exerciseId: p.exerciseId,
       prevDate: plan.startedAt,
       setupId: p.setupId,
+      suggestion: suggest(
+        p.sets.filter((s) => !s.warmup),
+        stepKg(unit),
+      ),
       sets: p.sets.map((s) => ({
         id: newId(),
         prevKg: s.kg,
@@ -511,6 +523,7 @@ export default function Workout({
         reps: s.reps,
         done: false,
         doneAt: null,
+        warmup: s.warmup || undefined,
       })),
     }));
     setTitle(plan.name);
@@ -556,7 +569,14 @@ export default function Workout({
           }))
         : [{ id: newId(), prevKg: null, prevReps: null, kg: null, reps: null, done: false, doneAt: null }];
 
-    setExercises((all) => [...all, { key: newId(), name: c.name, exerciseId: c.id, prevDate, setupId, sets }]);
+    const sg = suggest(
+      past.map((p) => ({ kg: p.weight_kg == null ? null : Number(p.weight_kg), reps: p.reps })),
+      stepKg(unit),
+    );
+    setExercises((all) => [
+      ...all,
+      { key: newId(), name: c.name, exerciseId: c.id, prevDate, setupId, suggestion: sg, sets },
+    ]);
   }
 
   async function pickExercise(c: Catalog) {
@@ -616,6 +636,17 @@ export default function Workout({
       all.map((ex) =>
         ex.key !== exKey ? ex : { ...ex, sets: ex.sets.map((s) => (s.id === setId ? { ...s, ...patch } : s)) },
       ),
+    );
+  }
+
+  // Fill every working set that is not done yet with the suggested weight and reps.
+  function applySuggestion(exKey: string) {
+    setExercises((all) =>
+      all.map((ex) => {
+        if (ex.key !== exKey || !ex.suggestion) return ex;
+        const { kg, reps } = ex.suggestion;
+        return { ...ex, sets: ex.sets.map((s) => (s.done || s.warmup ? s : { ...s, kg, reps })) };
+      }),
     );
   }
 
@@ -712,7 +743,7 @@ export default function Workout({
           workout_id: workoutId,
           exercise_id: (ex.exerciseId ?? idsByName.get(ex.name)) as string,
           set_index: i,
-          set_type: "working",
+          set_type: s.warmup ? "warmup" : "working",
           weight_kg: s.kg,
           reps: s.reps,
           completed_at: s.doneAt ?? finishedAt,
@@ -752,11 +783,11 @@ export default function Workout({
     }
   }
 
-  const doneSets = exercises.flatMap((e) => e.sets).filter((s) => s.done);
+  const doneSets = exercises.flatMap((e) => e.sets).filter((s) => s.done && !s.warmup);
   const volumeKg = doneSets.reduce((sum, s) => sum + (s.kg ?? 0) * (s.reps ?? 0), 0);
 
   const breakdown = exercises.map((ex) => {
-    const done = ex.sets.filter((s) => s.done);
+    const done = ex.sets.filter((s) => s.done && !s.warmup);
     return {
       key: ex.key,
       name: ex.name,
@@ -1176,6 +1207,23 @@ export default function Workout({
               />
             )}
 
+            {ex.suggestion && ex.sets.some((x) => !x.done && !x.warmup) && (
+              <button
+                type="button"
+                onClick={() => applySuggestion(ex.key)}
+                className="mt-3 w-full rounded-[14px] bg-tint px-4 py-2.5 text-left"
+              >
+                <span className="block text-sm font-extrabold text-accent">
+                  Try {formatWeight(ex.suggestion.kg, unit)} {unit} × {ex.suggestion.reps}
+                </span>
+                <span className="block text-xs text-muted">
+                  {ex.suggestion.hit
+                    ? `You hit your reps at ${formatWeight(ex.suggestion.lastKg, unit)} ${unit} last time. Tap to fill your sets.`
+                    : `Some sets fell short at ${formatWeight(ex.suggestion.lastKg, unit)} ${unit} last time, so stay here. Tap to fill your sets.`}
+                </span>
+              </button>
+            )}
+
             {ex.sets.length > 0 && (
               <div className="mt-2">
                 <div className="grid grid-cols-[28px_1fr_1fr_1fr_44px_36px] gap-2 px-0.5 text-xs font-bold text-muted">
@@ -1186,11 +1234,29 @@ export default function Workout({
                   <span />
                   <span />
                 </div>
-                {ex.sets.map((s, i) => (
-                  <div key={s.id} className="mt-1.5 grid grid-cols-[28px_1fr_1fr_1fr_44px_36px] items-center gap-2">
-                    <span className="text-base font-bold">{i + 1}</span>
+                {ex.sets.map((s, i) => {
+                  const num = ex.sets.slice(0, i + 1).filter((x) => !x.warmup).length;
+                  return (
+                  <div
+                    key={s.id}
+                    className={`mt-1.5 grid grid-cols-[28px_1fr_1fr_1fr_44px_36px] items-center gap-2 ${
+                      s.warmup ? "rounded-xl bg-tint" : ""
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => updateSet(ex.key, s.id, { warmup: !s.warmup })}
+                      aria-label={
+                        s.warmup
+                          ? "Warm-up set. Tap to make it a working set"
+                          : `Working set ${num}. Tap to make it a warm-up`
+                      }
+                      className={`h-9 rounded-lg text-base font-bold ${s.warmup ? "text-accent" : ""}`}
+                    >
+                      {s.warmup ? "W" : num}
+                    </button>
                     <span className="text-sm font-medium text-muted">
-                      {s.prevKg != null && s.prevReps != null
+                      {!s.warmup && s.prevKg != null && s.prevReps != null
                         ? `${formatWeight(s.prevKg, unit)} × ${s.prevReps}`
                         : "-"}
                     </span>
@@ -1241,7 +1307,8 @@ export default function Workout({
                       </svg>
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 

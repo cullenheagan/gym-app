@@ -9,7 +9,7 @@ import { type HomeWorkout, templates, weekTotals } from "@/lib/home-stats";
 import { type RawWorkout, type RepeatPlan, summarize, toPlan } from "./History";
 
 const SELECT =
-  "id,name,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,weight_kg,reps,completed_at,setup_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))";
+  "id,name,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,set_type,weight_kg,reps,completed_at,setup_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))";
 
 function toHome(list: RawWorkout[]): HomeWorkout<RepeatPlan>[] {
   return list.map((w) => {
