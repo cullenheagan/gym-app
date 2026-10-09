@@ -22,6 +22,8 @@ export default function Home({
   db,
   userId,
   unit,
+  name,
+  onProfile,
   inProgress,
   elapsedMs,
   onStart,
@@ -31,6 +33,8 @@ export default function Home({
   db: SupabaseClient;
   userId: string;
   unit: Unit;
+  name: string;
+  onProfile: () => void;
   inProgress: boolean;
   elapsedMs: number;
   onStart: () => void;
@@ -65,7 +69,16 @@ export default function Home({
 
   return (
     <div className="px-4 pb-8 pt-4">
-      <h2 className="px-1 text-[32px] font-extrabold leading-tight tracking-tight">Home</h2>
+      {name ? (
+        <h2 className="px-1 text-[32px] font-extrabold leading-tight tracking-tight">Hi, {name}</h2>
+      ) : (
+        <>
+          <h2 className="px-1 text-[32px] font-extrabold leading-tight tracking-tight">Home</h2>
+          <button type="button" onClick={onProfile} className="px-1 text-sm font-bold text-accent">
+            Add your name
+          </button>
+        </>
+      )}
 
       <button
         type="button"

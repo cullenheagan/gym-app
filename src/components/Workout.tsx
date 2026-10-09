@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Unit, formatWeight, fromDisplay, toDisplay } from "@/lib/units";
 import { formatClock, formatDate } from "@/lib/format";
 import Home from "./Home";
+import Profile from "./Profile";
 import Progress from "./Progress";
 import History, { type RepeatPlan } from "./History";
 import SetupPanel from "./SetupPanel";
@@ -181,7 +182,14 @@ export default function Workout({
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  const [view, setView] = useState<"home" | "log" | "history" | "gyms" | "progress">("home");
+  const [view, setView] = useState<"home" | "log" | "history" | "gyms" | "progress" | "profile">("home");
+  const [displayName, setDisplayName] = useState(() => {
+    try {
+      return localStorage.getItem(`name:${userId}`) ?? "";
+    } catch {
+      return "";
+    }
+  });
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [pending, setPending] = useState(0);
@@ -249,7 +257,15 @@ export default function Workout({
 
     let cancelled = false;
     (async () => {
-      const profile = await db.from("profiles").select("unit").eq("id", userId).maybeSingle();
+      let profile = await db.from("profiles").select("unit,display_name").eq("id", userId).maybeSingle();
+      if (profile.error) profile = await db.from("profiles").select("unit").eq("id", userId).maybeSingle();
+      const nm = (profile.data as { display_name?: string | null } | null)?.display_name;
+      if (!cancelled && typeof nm === "string") {
+        setDisplayName(nm);
+        try {
+          localStorage.setItem(`name:${userId}`, nm);
+        } catch {}
+      }
       if (!cancelled && profile.data && (profile.data.unit === "lb" || profile.data.unit === "kg")) {
         setUnit(profile.data.unit as Unit);
       }
@@ -374,6 +390,16 @@ export default function Workout({
       localStorage.setItem("unit", u);
     } catch {}
     db.from("profiles").update({ unit: u }).eq("id", userId).then(() => {});
+  }
+
+  async function saveName(name: string): Promise<string | null> {
+    const { error } = await db.from("profiles").update({ display_name: name || null }).eq("id", userId);
+    if (error) return explain(error.message, "Could not save your name.");
+    setDisplayName(name);
+    try {
+      localStorage.setItem(`name:${userId}`, name);
+    } catch {}
+    return null;
   }
 
   function toggleTheme() {
@@ -755,6 +781,17 @@ export default function Workout({
         </button>
         <button
           type="button"
+          onClick={() => setView("profile")}
+          aria-label="Profile"
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-card text-ink shadow-sm"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" />
+          </svg>
+        </button>
+        <button
+          type="button"
           onClick={handleSignOut}
           className="h-11 truncate px-3 text-sm font-semibold text-muted"
           aria-label={`Sign out ${email}`}
@@ -778,7 +815,7 @@ export default function Workout({
         </div>
       </div>
 
-      {view !== "log" ? (
+      {view !== "log" && view !== "profile" ? (
         <div className="mx-4 mt-4 flex rounded-xl bg-line p-[3px]" role="group" aria-label="Screen">
           {(["home", "history", "gyms", "progress"] as const).map((v) => (
             <button
@@ -831,6 +868,8 @@ export default function Workout({
           db={db}
           userId={userId}
           unit={unit}
+          name={displayName}
+          onProfile={() => setView("profile")}
           inProgress={active}
           elapsedMs={now - Date.parse(startedAt)}
           onStart={startWorkout}
@@ -838,6 +877,8 @@ export default function Workout({
           onTemplate={repeatWorkout}
         />
       )}
+
+      {view === "profile" && <Profile email={email} name={displayName} onSave={saveName} />}
 
       {view === "history" && <History db={db} userId={userId} unit={unit} onRepeat={repeatWorkout} />}
 

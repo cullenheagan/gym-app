@@ -3,6 +3,7 @@
 Newest first. Each entry says what changed and why. Mirrored in the Notion "Gym App" wiki.
 
 ## 2026-10-09
+- Profile: a person button in the top bar opens a Profile screen where you set your name. Home then greets you with "Hi, <name>" (until a name is set it shows Home with an Add your name link). The name is stored on your profile (migration 0008, adds an optional `display_name` column; existing data untouched) and kept on the phone for offline.
 - New Home screen, now the first tab (Home, History, Gyms, Progress). A big Start workout button opens the log screen; if a workout is already in progress it says Resume workout with the elapsed time. Below it, shortcuts to start from a past workout (one per workout name, most-done first, copying your last time) and this week's workouts and total lifted. The log screen has a back link to Home, and finishing or discarding a workout returns to Home. No database change.
 - New Progress tab: one chart per exercise from your logged working sets (warm-ups skipped). Pick Est. 1RM (default), Top weight or Volume, and a range of 1M, 3M, 6M or All. Shows Best, Latest and Change, marks new personal bests, and lists recent sessions. Tap or hover the chart to read any session. Works in lb or kg and keeps a saved copy for offline. No database change.
 - Database security: blocked the sign-up function `handle_new_user()` from being called through the public API (migration 0007). Sign-up still creates your profile as before. The Supabase security check now only reports leaked-password protection, which is a dashboard setting.
