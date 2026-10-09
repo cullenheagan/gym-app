@@ -30,8 +30,11 @@ type Row = {
   set_type: string | null;
   weight_kg: number | null;
   reps: number | null;
+  duration_s?: number | null;
+  distance_m?: number | null;
+  rpe?: number | null;
   completed_at: string | null;
-  workout: { name: string; started_at: string; gym: { name: string } | { name: string }[] | null } | { name: string; started_at: string; gym: { name: string } | { name: string }[] | null }[] | null;
+  workout: { name: string; kind?: string | null; started_at: string; gym: { name: string } | { name: string }[] | null } | { name: string; kind?: string | null; started_at: string; gym: { name: string } | { name: string }[] | null }[] | null;
   exercise: { name: string; equipment_type: string } | { name: string; equipment_type: string }[] | null;
   setup: { name: string; pin_position: string | null } | { name: string; pin_position: string | null }[] | null;
 };
@@ -50,6 +53,11 @@ export const CSV_HEADER = [
   "reps",
   "set_type",
   "completed_at",
+  "workout_type",
+  "duration_min",
+  "distance_km",
+  "distance_mi",
+  "effort",
 ];
 
 export function rowToCells(r: Row): Cell[] {
@@ -69,6 +77,11 @@ export function rowToCells(r: Row): Cell[] {
     r.reps,
     r.set_type ?? "",
     r.completed_at ?? "",
+    w?.kind ?? "strength",
+    r.duration_s == null ? null : Number((r.duration_s / 60).toFixed(2)),
+    r.distance_m == null ? null : Number((Number(r.distance_m) / 1000).toFixed(3)),
+    r.distance_m == null ? null : Number((Number(r.distance_m) / 1609.344).toFixed(3)),
+    r.rpe ?? null,
   ];
 }
 
@@ -80,7 +93,7 @@ export async function exportAllSets(db: SupabaseClient): Promise<{ csv: string; 
     const res = await db
       .from("workout_sets")
       .select(
-        "set_index,set_type,weight_kg,reps,completed_at,workout:workouts(name,started_at,gym:gyms(name)),exercise:exercises(name,equipment_type),setup:exercise_setups(name,pin_position)",
+        "set_index,set_type,weight_kg,reps,duration_s,distance_m,rpe,completed_at,workout:workouts(name,kind,started_at,gym:gyms(name)),exercise:exercises(name,equipment_type),setup:exercise_setups(name,pin_position)",
       )
       .order("completed_at", { ascending: true })
       .order("id", { ascending: true })

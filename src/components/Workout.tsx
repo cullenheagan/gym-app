@@ -5,9 +5,24 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Unit, formatWeight, fromDisplay, toDisplay } from "@/lib/units";
 import { formatClock, formatDate } from "@/lib/format";
 import { suggest } from "@/lib/suggest";
+import {
+  type Kind,
+  QUICK_ADD,
+  describeSet,
+  distFromDisplay,
+  distToDisplay,
+  distUnit,
+  fmtPace,
+  fmtSeconds,
+  kindLabel,
+  kindOf,
+  minToSec,
+  secToMin,
+} from "@/lib/kinds";
 import { normName } from "@/lib/history-filter";
 import { workoutNameChips } from "@/lib/workout-names";
 import Home from "./Home";
+import NumField from "./NumField";
 import GymPicker from "./GymPicker";
 import BottomBar, { type Section } from "./BottomBar";
 import Settings, { type ThemeChoice } from "./Settings";
@@ -33,6 +48,13 @@ type SetRow = {
   done: boolean;
   doneAt: string | null; // when the set was marked done
   warmup?: boolean; // warm-up sets are saved but left out of totals, progress and suggestions
+  // Cardio, intervals and sport sets (optional; strength sets and older drafts lack them)
+  durationS?: number | null;
+  distanceM?: number | null;
+  rpe?: number | null;
+  prevDurationS?: number | null;
+  prevDistanceM?: number | null;
+  prevRpe?: number | null;
 };
 
 type Exercise = {
@@ -41,6 +63,7 @@ type Exercise = {
   exerciseId: string | null; // null only for drafts saved before exercises were picked from a list
   prevDate: string | null; // when this exercise was last logged
   setupId?: string | null; // bench / seat setup used (optional; older drafts lack it)
+  kind?: Kind; // missing on older drafts, which were all strength
   suggestion?: { kg: number; reps: number; hit: boolean; lastKg: number } | null;
   sets: SetRow[];
 };
@@ -54,6 +77,7 @@ type Catalog = {
   gym_id: string | null;
   photo_path: string | null;
   archived_at?: string | null; // removed from your lists; history is kept
+  kind?: string | null; // strength, cardio, intervals or sport
 };
 
 type PastSet = {
@@ -64,6 +88,9 @@ type PastSet = {
   completed_at: string | null;
   setup_id: string | null;
   set_type?: string | null;
+  duration_s?: number | null;
+  distance_m?: number | null;
+  rpe?: number | null;
 };
 
 const newId = () => crypto.randomUUID();
@@ -131,6 +158,9 @@ function pendingPrevious(userId: string, exerciseId: string): Previous | null {
       completed_at: st.completed_at,
       setup_id: st.setup_id,
       set_type: st.set_type,
+      duration_s: st.duration_s ?? null,
+      distance_m: st.distance_m ?? null,
+      rpe: st.rpe ?? null,
     }))
     .sort((x, y) => x.set_index - y.set_index);
   return { sets, date: best.completed_at, setupId: best.setup_id };
@@ -143,7 +173,7 @@ async function loadPrevious(db: SupabaseClient, userId: string, exerciseId: stri
   let result: Previous = { sets: [], date: null, setupId: null };
   const { data, error } = await db
     .from("workout_sets")
-    .select("workout_id,set_index,weight_kg,reps,completed_at,setup_id,set_type")
+    .select("workout_id,set_index,weight_kg,reps,completed_at,setup_id,set_type,duration_s,distance_m,rpe")
     .eq("exercise_id", exerciseId)
     .not("completed_at", "is", null)
     .order("completed_at", { ascending: false })
@@ -181,6 +211,7 @@ export default function Workout({
   const [unit, setUnit] = useState<Unit>("lb");
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [title, setTitle] = useState("Workout");
+  const [workoutKind, setWorkoutKind] = useState<Kind>("strength");
   const [startedAt, setStartedAt] = useState(() => new Date().toISOString());
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [allGyms, setAllGyms] = useState<Gym[]>([]);
@@ -215,10 +246,10 @@ export default function Workout({
   });
   // Suggested names: up to four you have used before (most used first), then the usual splits.
   const nameChips = useMemo(
-    () => workoutNameChips(readCache<{ name: string }[]>(cacheKey(userId, "home")) ?? []),
+    () => workoutNameChips(readCache<{ name: string; kind?: string }[]>(cacheKey(userId, "home")) ?? [], workoutKind),
     // Recomputed when the log screen opens so a just-finished workout's name is included.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [userId, view],
+    [userId, view, workoutKind],
   );
   // The "tap a set number" hint goes away for good once you have marked a warm-up.
   const [warmupHintSeen, setWarmupHintSeen] = useState(() => {
@@ -257,8 +288,10 @@ export default function Workout({
           startedAt?: string;
           gymId?: string;
           exercises?: Exercise[];
+          kind?: string;
         };
         if (Array.isArray(d.exercises)) setExercises(d.exercises);
+        if (d.kind) setWorkoutKind(kindOf(d.kind));
         if (typeof d.title === "string") setTitle(d.title);
         if (typeof d.startedAt === "string") setStartedAt(d.startedAt);
         if (typeof d.gymId === "string" && d.gymId) setGymId(d.gymId);
@@ -272,9 +305,9 @@ export default function Workout({
     if (!draftReady) return;
     try {
       if (exercises.length === 0) localStorage.removeItem(draftKey);
-      else localStorage.setItem(draftKey, JSON.stringify({ title, startedAt, gymId, exercises }));
+      else localStorage.setItem(draftKey, JSON.stringify({ title, startedAt, gymId, exercises, kind: workoutKind }));
     } catch {}
-  }, [draftReady, draftKey, title, startedAt, gymId, exercises]);
+  }, [draftReady, draftKey, title, startedAt, gymId, exercises, workoutKind]);
 
   // The workout clock ticks while there is something in the workout.
   const active = exercises.length > 0;
@@ -386,7 +419,7 @@ export default function Workout({
       }
       const catFull = await db
         .from("exercises")
-        .select("id,name,equipment_type,gym_id,photo_path,archived_at")
+        .select("id,name,equipment_type,gym_id,photo_path,archived_at,kind")
         .order("name", { ascending: true });
       let catRows = catFull.error ? null : (catFull.data as Catalog[] | null);
       // Until migration 0009 is run the column does not exist; fall back so nothing breaks.
@@ -575,11 +608,16 @@ export default function Workout({
   }
 
   // Exercises you can pick right now: this gym's equipment plus anything that works anywhere.
-  const available = catalog.filter((c) => !c.archived_at && (c.gym_id === null || c.gym_id === gymId));
+  const available = catalog.filter(
+    (c) => !c.archived_at && kindOf(c.kind) === workoutKind && (c.gym_id === null || c.gym_id === gymId),
+  );
   const needle = query.trim().toLowerCase();
   const matches = available.filter((c) => c.name.toLowerCase().includes(needle));
   const exact = available.find((c) => c.name.toLowerCase() === needle);
-  const chosenType = EQUIPMENT.find((e) => e.value === newType) ?? EQUIPMENT[0];
+  const chosenType =
+    workoutKind === "strength"
+      ? (EQUIPMENT.find((e) => e.value === newType) ?? EQUIPMENT[0])
+      : { value: "other", label: "Other", anyGym: true };
   const gymName = gyms.find((g) => g.id === gymId)?.name;
 
   const urlFor = (id: string | null) => {
@@ -648,10 +686,14 @@ export default function Workout({
       exerciseId: p.exerciseId,
       prevDate: plan.startedAt,
       setupId: p.setupId,
-      suggestion: suggest(
-        p.sets.filter((s) => !s.warmup),
-        stepKg(unit),
-      ),
+      kind: kindOf(plan.kind),
+      suggestion:
+        kindOf(plan.kind) === "strength"
+          ? suggest(
+              p.sets.filter((s) => !s.warmup),
+              stepKg(unit),
+            )
+          : null,
       sets: p.sets.map((s) => ({
         id: newId(),
         prevKg: s.kg,
@@ -661,9 +703,16 @@ export default function Workout({
         done: false,
         doneAt: null,
         warmup: s.warmup || undefined,
+        prevDurationS: s.durationS ?? null,
+        prevDistanceM: s.distanceM ?? null,
+        prevRpe: s.rpe ?? null,
+        durationS: kindOf(plan.kind) === "strength" ? null : (s.durationS ?? null),
+        distanceM: kindOf(plan.kind) === "strength" ? null : (s.distanceM ?? null),
+        rpe: kindOf(plan.kind) === "strength" ? null : (s.rpe ?? null),
       })),
     }));
     setTitle(plan.name);
+    setWorkoutKind(kindOf(plan.kind));
     if (plan.gymId && gyms.some((g) => g.id === plan.gymId)) setGymId(plan.gymId);
     setStartedAt(new Date().toISOString());
     setExercises(copied);
@@ -672,7 +721,8 @@ export default function Workout({
   }
 
   // Begin an empty workout and open the log screen.
-  function startWorkout() {
+  function startWorkout(kind: Kind = "strength") {
+    setWorkoutKind(kind);
     setWorkoutStarted(true);
     setStartedAt(new Date().toISOString());
     setMessage(null);
@@ -693,27 +743,43 @@ export default function Workout({
   function addToWorkout(c: Catalog, past: PastSet[], prevDate: string | null, setupId: string | null = null) {
     // The clock starts when the first exercise goes in.
     if (exercises.length === 0) setStartedAt(new Date().toISOString());
+    const kind = kindOf(c.kind ?? workoutKind);
 
+    const blank = (): SetRow => ({
+      id: newId(),
+      prevKg: null,
+      prevReps: null,
+      kg: null,
+      reps: null,
+      done: false,
+      doneAt: null,
+    });
     const sets: SetRow[] =
       past.length > 0
         ? past.map((p: PastSet) => ({
             id: newId(),
             prevKg: p.weight_kg == null ? null : Number(p.weight_kg),
             prevReps: p.reps,
-            kg: p.weight_kg == null ? null : Number(p.weight_kg),
+            kg: kind === "strength" && p.weight_kg != null ? Number(p.weight_kg) : null,
             reps: null,
+            prevDurationS: p.duration_s ?? null,
+            prevDistanceM: p.distance_m == null ? null : Number(p.distance_m),
+            prevRpe: p.rpe == null ? null : Number(p.rpe),
             done: false,
             doneAt: null,
           }))
-        : [{ id: newId(), prevKg: null, prevReps: null, kg: null, reps: null, done: false, doneAt: null }];
+        : [blank()];
 
-    const sg = suggest(
-      past.map((p) => ({ kg: p.weight_kg == null ? null : Number(p.weight_kg), reps: p.reps })),
-      stepKg(unit),
-    );
+    const sg =
+      kind === "strength"
+        ? suggest(
+            past.map((p) => ({ kg: p.weight_kg == null ? null : Number(p.weight_kg), reps: p.reps })),
+            stepKg(unit),
+          )
+        : null;
     setExercises((all) => [
       ...all,
-      { key: newId(), name: c.name, exerciseId: c.id, prevDate, setupId, suggestion: sg, sets },
+      { key: newId(), name: c.name, exerciseId: c.id, prevDate, setupId, kind, suggestion: sg, sets },
     ]);
   }
 
@@ -724,15 +790,23 @@ export default function Workout({
     addToWorkout(c, prev.sets, prev.date, prev.setupId);
   }
 
-  async function createExercise() {
-    const name = query.trim();
+  // Tap-to-add for cardio, intervals and sport: creates the exercise (or brings a removed one back) and adds it.
+  async function addQuick(name: string) {
+    setQuery(name);
+    await createExercise(name);
+  }
+
+  async function createExercise(typed?: string) {
+    const name = (typed ?? query).trim();
     if (!name) return;
-    if (exact) {
-      await pickExercise(exact);
+    const existing =
+      typed != null ? available.find((c) => c.name.toLowerCase() === name.toLowerCase()) : exact;
+    if (existing) {
+      await pickExercise(existing);
       return;
     }
     const removedSame = catalog.find(
-      (c) => c.archived_at && c.name.toLowerCase() === name.toLowerCase() && (c.gym_id === null || c.gym_id === gymId),
+      (c) => c.archived_at && kindOf(c.kind) === workoutKind && c.name.toLowerCase() === name.toLowerCase() && (c.gym_id === null || c.gym_id === gymId),
     );
     if (removedSame) {
       const res = await db.from("exercises").update({ archived_at: null }).eq("id", removedSame.id);
@@ -756,8 +830,9 @@ export default function Workout({
         name,
         equipment_type: chosenType.value,
         gym_id: chosenType.anyGym ? null : gymId,
+        kind: workoutKind,
       })
-      .select("id,name,equipment_type,gym_id,photo_path")
+      .select("id,name,equipment_type,gym_id,photo_path,archived_at,kind")
       .single();
     if (error || !data) {
       setMessage({ kind: "error", text: explain(error?.message, "Could not create the exercise.") });
@@ -817,12 +892,16 @@ export default function Workout({
       all.map((ex) => {
         if (ex.key !== exKey) return ex;
         const last = ex.sets[ex.sets.length - 1];
+        const strength = kindOf(ex.kind) === "strength";
         const next: SetRow = {
           id: newId(),
           prevKg: last?.kg ?? null,
           prevReps: last?.reps ?? null,
-          kg: last?.kg ?? null,
+          kg: strength ? (last?.kg ?? null) : null,
           reps: null,
+          prevDurationS: strength ? null : (last?.durationS ?? last?.prevDurationS ?? null),
+          prevDistanceM: strength ? null : (last?.distanceM ?? last?.prevDistanceM ?? null),
+          prevRpe: strength ? null : (last?.rpe ?? last?.prevRpe ?? null),
           done: false,
           doneAt: null,
         };
@@ -849,6 +928,7 @@ export default function Workout({
     }
     setExercises([]);
     setWorkoutStarted(false);
+    setWorkoutKind("strength");
     setTitle("Workout");
     setStartedAt(new Date().toISOString());
     setConfirmDiscard(false);
@@ -896,6 +976,7 @@ export default function Workout({
       name: title.trim() || "Workout",
       started_at: startedAt,
       ended_at: finishedAt,
+      kind: workoutKind,
     };
     const sets: OutboxSet[] = withDone.flatMap((ex) =>
       ex.sets
@@ -909,6 +990,9 @@ export default function Workout({
           set_type: s.warmup ? "warmup" : "working",
           weight_kg: s.kg,
           reps: s.reps,
+          duration_s: s.durationS ?? null,
+          distance_m: s.distanceM ?? null,
+          rpe: s.rpe ?? null,
           completed_at: s.doneAt ?? finishedAt,
           setup_id: ex.setupId ?? null,
         })),
@@ -925,6 +1009,7 @@ export default function Workout({
     }
     setExercises([]);
     setWorkoutStarted(false);
+    setWorkoutKind("strength");
     setTitle("Workout");
     setStartedAt(new Date().toISOString());
     setPending(loadOutbox(userId).length);
@@ -947,17 +1032,52 @@ export default function Workout({
     }
   }
 
+  // What the summary card shows depends on the workout type.
   const doneSets = exercises.flatMap((e) => e.sets).filter((s) => s.done && !s.warmup);
   const volumeKg = doneSets.reduce((sum, s) => sum + (s.kg ?? 0) * (s.reps ?? 0), 0);
+  const totalSeconds = doneSets.reduce((sum, s) => sum + (s.durationS ?? 0), 0);
+  const totalMeters = doneSets.reduce((sum, s) => sum + (s.distanceM ?? 0), 0);
+  const effortSets = doneSets.filter((s) => s.rpe != null);
+  const avgEffort = effortSets.length ? effortSets.reduce((sum, s) => sum + (s.rpe ?? 0), 0) / effortSets.length : null;
+  const setWord = (n: number) =>
+    workoutKind === "strength" ? (n === 1 ? "set" : "sets") : workoutKind === "intervals" ? (n === 1 ? "round" : "rounds") : n === 1 ? "entry" : "entries";
+  const headline: { label: string; value: string; unit: string } =
+    workoutKind === "strength"
+      ? { label: "Total weight lifted", value: Math.round(toDisplay(volumeKg, unit)).toLocaleString("en-US"), unit }
+      : workoutKind === "cardio" && totalMeters > 0
+        ? { label: "Total distance", value: String(distToDisplay(totalMeters, unit)), unit: distUnit(unit) }
+        : { label: "Total time", value: String(Math.round(secToMin(totalSeconds))), unit: "min" };
+  const subLine =
+    workoutKind === "cardio" && totalMeters > 0 && totalSeconds > 0
+      ? `${fmtSeconds(totalSeconds)} · ${fmtPace(totalSeconds, totalMeters, unit) ?? ""}`
+      : workoutKind === "sport" && avgEffort != null
+        ? `Average effort ${Math.round(avgEffort * 10) / 10}`
+        : "";
 
   const breakdown = exercises.map((ex) => {
     const done = ex.sets.filter((s) => s.done && !s.warmup);
+    const kind = kindOf(ex.kind);
+    const secs = done.reduce((sum, s) => sum + (s.durationS ?? 0), 0);
+    const meters = done.reduce((sum, s) => sum + (s.distanceM ?? 0), 0);
     return {
       key: ex.key,
       name: ex.name,
       count: done.length,
       volumeKg: done.reduce((sum, s) => sum + (s.kg ?? 0) * (s.reps ?? 0), 0),
-      sets: done.map((s) => ({ id: s.id, kg: s.kg ?? 0, reps: s.reps ?? 0 })),
+      total:
+        kind === "strength"
+          ? null
+          : kind === "cardio" && meters > 0
+            ? `${distToDisplay(meters, unit)} ${distUnit(unit)}`
+            : fmtSeconds(secs),
+      lines: done.map((s) =>
+        describeSet(
+          kind,
+          { kg: s.kg, reps: s.reps, durationS: s.durationS ?? null, distanceM: s.distanceM ?? null, rpe: s.rpe ?? null },
+          unit,
+          (kg) => formatWeight(kg, unit),
+        ),
+      ),
     };
   });
 
@@ -1115,6 +1235,8 @@ export default function Workout({
           </button>
         </div>
 
+        <p className="px-1 text-xs font-bold uppercase tracking-wider text-muted">{kindLabel(workoutKind)} workout</p>
+
         {exercises.length === 0 && (
           <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Suggested workout names">
             {nameChips.map((n) => (
@@ -1142,14 +1264,15 @@ export default function Workout({
             className="flex w-full items-start justify-between gap-3 p-4 text-left"
           >
             <span>
-              <span className="block text-xs font-bold uppercase tracking-wider opacity-80">Total weight lifted</span>
+              <span className="block text-xs font-bold uppercase tracking-wider opacity-80">{headline.label}</span>
               <span className="mt-1 block text-[44px] font-extrabold leading-none tracking-tight">
-                {Math.round(toDisplay(volumeKg, unit)).toLocaleString("en-US")}
-                <span className="ml-1.5 text-xl font-bold opacity-80">{unit}</span>
+                {headline.value}
+                <span className="ml-1.5 text-xl font-bold opacity-80">{headline.unit}</span>
               </span>
               <span className="mt-2 block text-sm font-semibold opacity-90">
-                {doneSets.length} {doneSets.length === 1 ? "set" : "sets"} completed
+                {doneSets.length} {setWord(doneSets.length)} completed
                 {active && ` · ${formatClock(now - Date.parse(startedAt))}`}
+                {subLine && ` · ${subLine}`}
               </span>
             </span>
             <ChevronDown className={`mt-1 shrink-0 transition-transform ${showBreakdown ? "rotate-180" : ""}`} />
@@ -1167,14 +1290,14 @@ export default function Workout({
                       <li key={b.key}>
                         <div className="flex items-baseline justify-between gap-3">
                           <span className="text-sm font-bold">{b.name}</span>
-                          <span className="text-sm font-extrabold">
-                            {Math.round(toDisplay(b.volumeKg, unit)).toLocaleString("en-US")} {unit}
+<span className="text-sm font-extrabold">
+                            {b.total ?? `${Math.round(toDisplay(b.volumeKg, unit)).toLocaleString("en-US")} ${unit}`}
                           </span>
                         </div>
                         <p className="mt-0.5 text-[13px] font-medium opacity-85">
-                          {b.count} {b.count === 1 ? "set" : "sets"}
+                          {b.count} {setWord(b.count)}
                           {" · "}
-                          {b.sets.map((s) => `${formatWeight(s.kg, unit)} × ${s.reps}`).join(", ")}
+                          {b.lines.join(", ")}
                         </p>
                       </li>
                     ))}
@@ -1265,7 +1388,27 @@ export default function Workout({
               </ul>
             )}
 
-            {available.length === 0 && !needle && (
+            {!needle && QUICK_ADD[workoutKind].filter((n) => !available.some((c) => c.name.toLowerCase() === n.toLowerCase())).length > 0 && (
+              <div className="mt-3">
+                <p className="text-xs font-bold uppercase tracking-wider text-muted">Quick add</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {QUICK_ADD[workoutKind]
+                    .filter((n) => !available.some((c) => c.name.toLowerCase() === n.toLowerCase()))
+                    .map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => addQuick(n)}
+                        className="h-9 rounded-full bg-field px-4 text-[13px] font-bold"
+                      >
+                        {n}
+                      </button>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {available.length === 0 && !needle && workoutKind === "strength" && (
               <p className="mt-3 text-sm font-medium text-muted">
                 Nothing saved{gymName ? ` for ${gymName}` : ""} yet. Type a name to create your first exercise.
               </p>
@@ -1274,6 +1417,8 @@ export default function Workout({
             {needle && !exact && (
               <div className="mt-3 border-t border-line pt-3">
                 <p className="text-sm font-bold">Create &ldquo;{query.trim()}&rdquo;</p>
+                {workoutKind === "strength" && (
+                <>
                 <label htmlFor="exercise-type" className="mb-1.5 mt-2 block text-xs font-bold uppercase tracking-wider text-muted">
                   Equipment
                 </label>
@@ -1299,6 +1444,8 @@ export default function Workout({
                       ? `Saved for ${gymName} only.`
                       : "Pick a gym first. Machines belong to one gym."}
                 </p>
+                </>
+                )}
                 <div className="mt-3 flex items-center gap-3">
                   {photoPreview ? (
                     <>
@@ -1319,7 +1466,7 @@ export default function Workout({
                 </div>
                 <button
                   type="button"
-                  onClick={createExercise}
+                  onClick={() => createExercise()}
                   className="mt-3 h-11 w-full rounded-[14px] bg-accent text-sm font-bold text-on-accent"
                 >
                   Create and add
@@ -1408,7 +1555,7 @@ export default function Workout({
 
             {ex.sets.length > 0 && (
               <div className="mt-2">
-                {!warmupHintSeen && (
+                {!warmupHintSeen && kindOf(ex.kind) === "strength" && (
                   <p className="mb-1.5 px-0.5 text-xs font-semibold text-accent">
                     Tap a set number to mark it as a warm-up
                   </p>
@@ -1416,8 +1563,18 @@ export default function Workout({
                 <div className="grid grid-cols-[28px_1fr_1fr_1fr_44px_36px] gap-2 px-0.5 text-xs font-bold text-muted">
                   <span>Set</span>
                   <span>Previous</span>
-                  <span className="text-center">{unit}</span>
-                  <span className="text-center">Reps</span>
+                  <span className="text-center">
+                    {kindOf(ex.kind) === "strength" ? unit : kindOf(ex.kind) === "intervals" ? "sec" : "min"}
+                  </span>
+                  <span className="text-center">
+                    {kindOf(ex.kind) === "cardio"
+                      ? distUnit(unit)
+                      : kindOf(ex.kind) === "sport"
+                        ? "Effort"
+                        : kindOf(ex.kind) === "intervals"
+                          ? "Reps"
+                          : "Reps"}
+                  </span>
                   <span />
                   <span />
                 </div>
@@ -1430,6 +1587,11 @@ export default function Workout({
                       s.warmup ? "rounded-xl bg-tint" : ""
                     }`}
                   >
+                    {kindOf(ex.kind) !== "strength" ? (
+                      <span className="flex h-8 w-7 items-center justify-center rounded-full bg-field text-base font-bold">
+                        {i + 1}
+                      </span>
+                    ) : (
                     <button
                       type="button"
                       onClick={() => toggleWarmup(ex.key, s.id, !s.warmup)}
@@ -1442,31 +1604,80 @@ export default function Workout({
                     >
                       {s.warmup ? "W" : num}
                     </button>
+                    )}
                     <span className="text-sm font-medium text-muted">
-                      {!s.warmup && s.prevKg != null && s.prevReps != null
-                        ? `${formatWeight(s.prevKg, unit)} × ${s.prevReps}`
-                        : "-"}
+                      {kindOf(ex.kind) !== "strength"
+                        ? describeSet(
+                            kindOf(ex.kind),
+                            {
+                              kg: null,
+                              reps: null,
+                              durationS: s.prevDurationS ?? null,
+                              distanceM: s.prevDistanceM ?? null,
+                              rpe: s.prevRpe ?? null,
+                            },
+                            unit,
+                            String,
+                          )
+                        : !s.warmup && s.prevKg != null && s.prevReps != null
+                          ? `${formatWeight(s.prevKg, unit)} × ${s.prevReps}`
+                          : "-"}
                     </span>
-                    <input
-                      inputMode="decimal"
-                      aria-label={`Weight in ${unit}, set ${i + 1}`}
-                      value={s.kg == null ? "" : formatWeight(s.kg, unit)}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        updateSet(ex.key, s.id, { kg: Number.isNaN(v) ? null : fromDisplay(v, unit) });
-                      }}
-                      className="h-11 w-full rounded-xl border-2 border-transparent bg-field text-center text-[17px] font-bold outline-none focus:border-accent"
-                    />
-                    <input
-                      inputMode="numeric"
-                      aria-label={`Reps, set ${i + 1}`}
-                      value={s.reps ?? ""}
-                      onChange={(e) => {
-                        const v = parseInt(e.target.value, 10);
-                        updateSet(ex.key, s.id, { reps: Number.isNaN(v) ? null : v });
-                      }}
-                      className="h-11 w-full rounded-xl border-2 border-transparent bg-field text-center text-[17px] font-bold outline-none focus:border-accent"
-                    />
+                    {kindOf(ex.kind) === "strength" ? (
+                      <>
+                        <NumField
+                          ariaLabel={`Weight in ${unit}, set ${i + 1}`}
+                          value={s.kg == null ? null : toDisplay(s.kg, unit)}
+                          onChange={(v) => updateSet(ex.key, s.id, { kg: v == null ? null : fromDisplay(v, unit) })}
+                        />
+                        <NumField
+                          integer
+                          ariaLabel={`Reps, set ${i + 1}`}
+                          value={s.reps ?? null}
+                          onChange={(v) => updateSet(ex.key, s.id, { reps: v })}
+                        />
+                      </>
+                    ) : kindOf(ex.kind) === "intervals" ? (
+                      <>
+                        <NumField
+                          integer
+                          ariaLabel={`Seconds, round ${i + 1}`}
+                          value={s.durationS ?? null}
+                          onChange={(v) => updateSet(ex.key, s.id, { durationS: v })}
+                        />
+                        <NumField
+                          integer
+                          ariaLabel={`Reps, round ${i + 1} (optional)`}
+                          value={s.reps ?? null}
+                          onChange={(v) => updateSet(ex.key, s.id, { reps: v })}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <NumField
+                          ariaLabel={`Minutes, entry ${i + 1}`}
+                          value={s.durationS == null ? null : secToMin(s.durationS)}
+                          onChange={(v) => updateSet(ex.key, s.id, { durationS: v == null ? null : minToSec(v) })}
+                        />
+                        {kindOf(ex.kind) === "cardio" ? (
+                          <NumField
+                            ariaLabel={`Distance in ${distUnit(unit)}, entry ${i + 1}`}
+                            value={s.distanceM == null ? null : distToDisplay(s.distanceM, unit)}
+                            onChange={(v) =>
+                              updateSet(ex.key, s.id, { distanceM: v == null ? null : distFromDisplay(v, unit) })
+                            }
+                          />
+                        ) : (
+                          <NumField
+                            integer
+                            max={10}
+                            ariaLabel={`Effort 1 to 10, entry ${i + 1}`}
+                            value={s.rpe ?? null}
+                            onChange={(v) => updateSet(ex.key, s.id, { rpe: v })}
+                          />
+                        )}
+                      </>
+                    )}
                     <button
                       type="button"
                       aria-label={`Set ${i + 1} ${s.done ? "done, tap to undo" : "mark done"}`}
@@ -1504,7 +1715,7 @@ export default function Workout({
               onClick={() => addSet(ex.key)}
               className="mt-3 h-11 w-full rounded-[14px] bg-tint text-sm font-bold text-accent"
             >
-              Add set
+              {kindOf(ex.kind) === "strength" ? "Add set" : kindOf(ex.kind) === "intervals" ? "Add round" : "Add entry"}
             </button>
           </section>
         ))}

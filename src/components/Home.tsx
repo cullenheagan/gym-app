@@ -3,18 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Unit, toDisplay } from "@/lib/units";
+import { KINDS, type Kind, kindLabel } from "@/lib/kinds";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
-import { formatClock } from "@/lib/format";
+import { formatClock, formatDuration } from "@/lib/format";
 import { type HomeWorkout, templates, weekTotals } from "@/lib/home-stats";
 import { type RawWorkout, type RepeatPlan, summarize, toPlan } from "./History";
 
 const SELECT =
-  "id,name,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,set_type,weight_kg,reps,completed_at,setup_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))";
+  "id,name,kind,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,set_type,duration_s,distance_m,rpe,weight_kg,reps,completed_at,setup_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))";
 
 function toHome(list: RawWorkout[]): HomeWorkout<RepeatPlan>[] {
   return list.map((w) => {
     const sum = summarize(w);
-    return { name: w.name, startedAt: w.started_at, volumeKg: sum.volumeKg, plan: toPlan(w, sum) };
+    return { name: w.name, kind: sum.kind, startedAt: w.started_at, volumeKg: sum.volumeKg, activeMs: sum.total ?? 0, plan: toPlan(w, sum) };
   });
 }
 
@@ -38,7 +39,7 @@ export default function Home({
   onProfile: () => void;
   inProgress: boolean;
   elapsedMs: number;
-  onStart: () => void;
+  onStart: (kind?: Kind) => void;
   onResume: () => void;
   onTemplate: (plan: RepeatPlan) => void;
   startOnly?: boolean; // the Train > Workout screen: just the start button and shortcuts
@@ -84,7 +85,7 @@ export default function Home({
 
       <button
         type="button"
-        onClick={inProgress ? onResume : onStart}
+        onClick={inProgress ? onResume : () => onStart("strength")}
         className={`${startOnly ? "mt-0" : "mt-4"} w-full rounded-[20px] bg-accent p-5 text-left text-on-accent`}
       >
         <span className="block text-xl font-extrabold">{inProgress ? "Resume workout" : "Start workout"}</span>
@@ -92,6 +93,25 @@ export default function Home({
           {inProgress ? `In progress \u00b7 ${formatClock(elapsedMs)}` : "Begin with an empty workout"}
         </span>
       </button>
+
+      {!inProgress && (
+        <section className="mt-6">
+          <h3 className="px-1 text-sm font-extrabold">What kind?</h3>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {KINDS.map((k) => (
+              <button
+                key={k.id}
+                type="button"
+                onClick={() => onStart(k.id)}
+                className="rounded-[14px] bg-card px-4 py-3 text-left shadow-sm"
+              >
+                <span className="block text-sm font-extrabold">{k.label}</span>
+                <span className="block text-xs text-muted">{k.blurb}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {tpls.length > 0 && (
         <section className="mt-6">
@@ -106,6 +126,7 @@ export default function Home({
               >
                 <span className="block truncate text-sm font-extrabold">{t.label}</span>
                 <span className="block text-xs text-muted">
+                  {t.kind !== "strength" ? `${kindLabel(t.kind)} · ` : ""}
                   {t.plan.exercises.length} {t.plan.exercises.length === 1 ? "exercise" : "exercises"}
                 </span>
               </button>
@@ -117,18 +138,26 @@ export default function Home({
       {!startOnly && (
       <section className="mt-6">
         <h3 className="px-1 text-sm font-extrabold">This week</h3>
-        <div className="mt-2 grid grid-cols-2 gap-2 rounded-[20px] bg-card p-4 shadow-sm">
+        <div
+          className={`mt-2 grid gap-2 rounded-[20px] bg-card p-4 shadow-sm ${week.volumeKg > 0 ? "grid-cols-3" : "grid-cols-2"}`}
+        >
           <div>
             <div className="text-xs text-muted">Workouts</div>
             <div className="text-2xl font-extrabold">{list == null ? "-" : week.count}</div>
           </div>
           <div>
-            <div className="text-xs text-muted">Total lifted</div>
-            <div className="text-2xl font-extrabold">
-              {list == null ? "-" : Math.round(toDisplay(week.volumeKg, unit)).toLocaleString("en-US")}
-              <span className="ml-1 text-sm font-bold text-muted">{unit}</span>
-            </div>
+            <div className="text-xs text-muted">Active time</div>
+            <div className="text-2xl font-extrabold">{list == null ? "-" : formatDuration(week.activeMs)}</div>
           </div>
+          {week.volumeKg > 0 && (
+            <div>
+              <div className="text-xs text-muted">Total lifted</div>
+              <div className="text-2xl font-extrabold">
+                {Math.round(toDisplay(week.volumeKg, unit)).toLocaleString("en-US")}
+                <span className="ml-1 text-sm font-bold text-muted">{unit}</span>
+              </div>
+            </div>
+          )}
         </div>
       </section>
       )}

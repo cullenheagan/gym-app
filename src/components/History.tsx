@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Unit, formatWeight, toDisplay } from "@/lib/units";
+import { type Kind, describeSet, distToDisplay, distUnit, fmtSeconds, kindLabel, kindOf } from "@/lib/kinds";
 import { formatDate, formatDuration } from "@/lib/format";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { downloadCsv, exportAllSets } from "@/lib/csv";
@@ -16,19 +17,30 @@ type SetupRef = { name: string; pin_position: string | null };
 // Everything needed to rebuild a past workout as a new one.
 export type RepeatPlan = {
   name: string;
+  kind?: string;
   gymId: string | null;
   startedAt: string;
   exercises: {
     exerciseId: string;
     name: string;
     setupId: string | null;
-    sets: { kg: number | null; reps: number | null; warmup?: boolean }[];
+    sets: {
+      kg: number | null;
+      reps: number | null;
+      warmup?: boolean;
+      durationS?: number | null;
+      distanceM?: number | null;
+      rpe?: number | null;
+    }[];
   }[];
 };
 type RawSet = {
   id: string;
   set_index: number;
   set_type?: string | null;
+  duration_s?: number | null;
+  distance_m?: number | null;
+  rpe?: number | null;
   weight_kg: number | null;
   reps: number | null;
   completed_at: string | null;
@@ -39,6 +51,7 @@ type RawSet = {
 export type RawWorkout = {
   id: string;
   name: string;
+  kind?: string | null;
   started_at: string;
   ended_at: string | null;
   gym_id: string | null;
@@ -101,12 +114,15 @@ export function summarize(w: RawWorkout) {
   const working = w.workout_sets.filter((s) => s.set_type !== "warmup");
   const volumeKg = working.reduce((sum, s) => sum + Number(s.weight_kg ?? 0) * (s.reps ?? 0), 0);
   const total = w.ended_at ? Math.max(0, ms(w.ended_at) - ms(w.started_at)) : null;
-  return { exercises, volumeKg, setCount: working.length, total };
+  const activeSeconds = working.reduce((sum, s) => sum + Number(s.duration_s ?? 0), 0);
+  const meters = working.reduce((sum, s) => sum + Number(s.distance_m ?? 0), 0);
+  return { exercises, volumeKg, setCount: working.length, total, activeSeconds, meters, kind: kindOf(w.kind) as Kind };
 }
 
 export function toPlan(w: RawWorkout, sum: ReturnType<typeof summarize>): RepeatPlan {
   return {
     name: w.name,
+    kind: sum.kind,
     gymId: w.gym_id,
     startedAt: w.started_at,
     exercises: sum.exercises
@@ -119,6 +135,9 @@ export function toPlan(w: RawWorkout, sum: ReturnType<typeof summarize>): Repeat
           kg: s.weight_kg == null ? null : Number(s.weight_kg),
           reps: s.reps,
           warmup: s.set_type === "warmup" || undefined,
+          durationS: s.duration_s ?? null,
+          distanceM: s.distance_m == null ? null : Number(s.distance_m),
+          rpe: s.rpe == null ? null : Number(s.rpe),
         })),
       })),
   };
@@ -199,7 +218,7 @@ export default function History({
       const res = await db
         .from("workouts")
         .select(
-          "id,name,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,set_type,weight_kg,reps,completed_at,setup_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))",
+          "id,name,kind,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,set_type,duration_s,distance_m,rpe,weight_kg,reps,completed_at,setup_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))",
         )
         .order("started_at", { ascending: false })
         .limit(200);
@@ -356,12 +375,19 @@ export default function History({
                   {gym ? ` · ${gym}` : ""}
                 </span>
                 <span className="mt-2 block text-[26px] font-extrabold leading-none tracking-tight text-accent">
-                  {Math.round(toDisplay(sum.volumeKg, unit)).toLocaleString("en-US")}
-                  <span className="ml-1 text-sm font-bold text-muted">{unit}</span>
+                  {sum.kind === "strength"
+                    ? Math.round(toDisplay(sum.volumeKg, unit)).toLocaleString("en-US")
+                    : sum.kind === "cardio" && sum.meters > 0
+                      ? distToDisplay(sum.meters, unit)
+                      : fmtSeconds(sum.activeSeconds)}
+                  <span className="ml-1 text-sm font-bold text-muted">
+                    {sum.kind === "strength" ? unit : sum.kind === "cardio" && sum.meters > 0 ? distUnit(unit) : ""}
+                  </span>
                 </span>
                 <span className="mt-1 block text-[13px] font-medium text-muted">
+                  {sum.kind !== "strength" ? `${kindLabel(sum.kind)} · ` : ""}
                   {sum.exercises.length} {sum.exercises.length === 1 ? "exercise" : "exercises"} · {sum.setCount}{" "}
-                  {sum.setCount === 1 ? "set" : "sets"}
+                  {sum.kind === "intervals" ? (sum.setCount === 1 ? "round" : "rounds") : sum.kind === "strength" ? (sum.setCount === 1 ? "set" : "sets") : sum.setCount === 1 ? "entry" : "entries"}
                   {sum.total != null ? ` · ${formatDuration(sum.total)}` : ""}
                 </span>
               </span>
@@ -407,7 +433,18 @@ export default function History({
                         {ex.sets
                           .map(
                             (s) =>
-                              `${s.set_type === "warmup" ? "W " : ""}${formatWeight(Number(s.weight_kg ?? 0), unit)} × ${s.reps ?? 0}`,
+                              `${s.set_type === "warmup" ? "W " : ""}${describeSet(
+                                sum.kind,
+                                {
+                                  kg: s.weight_kg == null ? null : Number(s.weight_kg),
+                                  reps: s.reps,
+                                  durationS: s.duration_s ?? null,
+                                  distanceM: s.distance_m == null ? null : Number(s.distance_m),
+                                  rpe: s.rpe == null ? null : Number(s.rpe),
+                                },
+                                unit,
+                                (kg) => formatWeight(kg, unit),
+                              )}`,
                           )
                           .join(", ")}
                       </p>

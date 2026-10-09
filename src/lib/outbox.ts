@@ -10,6 +10,7 @@ export type OutboxWorkout = {
   name: string;
   started_at: string;
   ended_at: string;
+  kind?: string; // strength, cardio, intervals or sport (older saved workouts have none)
 };
 
 export type OutboxSet = {
@@ -23,6 +24,9 @@ export type OutboxSet = {
   reps: number | null;
   completed_at: string;
   setup_id: string | null;
+  duration_s?: number | null;
+  distance_m?: number | null;
+  rpe?: number | null;
 };
 
 export type OutboxItem = {
