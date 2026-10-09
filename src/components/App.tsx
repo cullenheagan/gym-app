@@ -6,8 +6,37 @@ import { supabase } from "@/lib/supabase";
 import AuthForm from "./AuthForm";
 import Workout from "./Workout";
 
+type KnownUser = { id: string; email: string };
+const LAST_USER = "lastUser";
+
+function rememberUser(user: KnownUser) {
+  try {
+    localStorage.setItem(LAST_USER, JSON.stringify(user));
+  } catch {}
+}
+
+function forgetUser() {
+  try {
+    localStorage.removeItem(LAST_USER);
+  } catch {}
+}
+
+// With no signal the saved sign-in cannot be refreshed. If the phone is offline and someone
+// signed in here before, open the app as that person so a workout can still be logged.
+function offlineUser(): KnownUser | null {
+  try {
+    if (navigator.onLine !== false) return null;
+    const raw = localStorage.getItem(LAST_USER);
+    const u = raw ? (JSON.parse(raw) as KnownUser) : null;
+    return u && typeof u.id === "string" ? u : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
+  const [fallback, setFallback] = useState<KnownUser | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -15,12 +44,27 @@ export default function App() {
       setReady(true);
       return;
     }
-    supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => {
-      setSession(data.session);
-      setReady(true);
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event: string, next: Session | null) => {
+    supabase.auth
+      .getSession()
+      .then(({ data }: { data: { session: Session | null } }) => {
+        setSession(data.session);
+        if (data.session) rememberUser({ id: data.session.user.id, email: data.session.user.email ?? "" });
+        else setFallback(offlineUser());
+        setReady(true);
+      })
+      .catch(() => {
+        setFallback(offlineUser());
+        setReady(true);
+      });
+    const { data: sub } = supabase.auth.onAuthStateChange((event: string, next: Session | null) => {
       setSession(next);
+      if (next) {
+        rememberUser({ id: next.user.id, email: next.user.email ?? "" });
+        setFallback(null);
+      } else if (event === "SIGNED_OUT") {
+        forgetUser();
+        setFallback(null);
+      }
     });
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -43,16 +87,20 @@ export default function App() {
     return <main className="mx-auto max-w-md px-5 pt-16 text-muted">Loading...</main>;
   }
 
-  if (!session) {
+  const user: KnownUser | null = session ? { id: session.user.id, email: session.user.email ?? "" } : fallback;
+
+  if (!user) {
     return <AuthForm db={db} />;
   }
 
   return (
     <Workout
       db={db}
-      userId={session.user.id}
-      email={session.user.email ?? ""}
+      userId={user.id}
+      email={user.email}
       onSignOut={() => {
+        forgetUser();
+        setFallback(null);
         db.auth.signOut();
       }}
     />

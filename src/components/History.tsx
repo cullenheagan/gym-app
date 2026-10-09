@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Unit, formatWeight, toDisplay } from "@/lib/units";
 import { formatDate, formatDuration } from "@/lib/format";
+import { cacheKey, readCache, writeCache } from "@/lib/cache";
+import { downloadCsv, exportAllSets } from "@/lib/csv";
+import { explain } from "@/lib/net";
 
 type Named = { name: string };
 type ExRef = { id: string; name: string };
@@ -119,10 +122,12 @@ function toPlan(w: RawWorkout, sum: ReturnType<typeof summarize>): RepeatPlan {
 
 export default function History({
   db,
+  userId,
   unit,
   onRepeat,
 }: {
   db: SupabaseClient;
+  userId: string;
   unit: Unit;
   onRepeat: (plan: RepeatPlan) => void;
 }) {
@@ -130,6 +135,9 @@ export default function History({
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false); // showing the copy kept on this device
+  const [exporting, setExporting] = useState(false);
+  const [exportNote, setExportNote] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,17 +150,26 @@ export default function History({
         .order("started_at", { ascending: false })
         .limit(50);
       if (cancelled) return;
+      const ck = cacheKey(userId, "history");
       if (res.error) {
-        setError(res.error.message);
-        setWorkouts([]);
+        const copy = readCache<RawWorkout[]>(ck);
+        if (copy) {
+          setWorkouts(copy);
+          setSaved(true);
+        } else {
+          setError(explain(res.error.message, "Could not load your history."));
+          setWorkouts([]);
+        }
       } else {
-        setWorkouts((res.data ?? []) as unknown as RawWorkout[]);
+        const list = (res.data ?? []) as unknown as RawWorkout[];
+        writeCache(ck, list);
+        setWorkouts(list);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [db]);
+  }, [db, userId]);
 
   async function remove(id: string) {
     if (confirmId !== id) {
@@ -170,6 +187,23 @@ export default function History({
     setOpenId(null);
   }
 
+  async function exportCsv() {
+    setExporting(true);
+    setExportNote(null);
+    const out = await exportAllSets(db);
+    setExporting(false);
+    if ("error" in out) {
+      setExportNote(explain(out.error, "Could not export your data."));
+      return;
+    }
+    if (out.count === 0) {
+      setExportNote("There are no sets to export yet.");
+      return;
+    }
+    downloadCsv(`gym-app-export-${new Date().toISOString().slice(0, 10)}.csv`, out.csv);
+    setExportNote(`Exported ${out.count} ${out.count === 1 ? "set" : "sets"}.`);
+  }
+
   if (workouts === null) {
     return <p className="px-5 pt-6 text-sm font-medium text-muted">Loading...</p>;
   }
@@ -179,6 +213,12 @@ export default function History({
       {error && (
         <p role="alert" className="px-1 text-sm font-semibold text-red-600">
           {error}
+        </p>
+      )}
+
+      {saved && (
+        <p className="px-1 text-[13px] font-semibold text-muted">
+          You&apos;re offline. Showing the history saved on this phone.
         </p>
       )}
 
@@ -282,6 +322,20 @@ export default function History({
           </article>
         );
       })}
+
+      {workouts.length > 0 && (
+        <div className="px-1 pb-2 pt-1">
+          <button
+            type="button"
+            onClick={exportCsv}
+            disabled={exporting}
+            className="h-11 w-full rounded-[14px] bg-card text-sm font-bold shadow-sm disabled:opacity-60"
+          >
+            {exporting ? "Preparing..." : "Export all data (CSV)"}
+          </button>
+          {exportNote && <p className="mt-2 text-center text-[13px] font-medium text-muted">{exportNote}</p>}
+        </div>
+      )}
     </section>
   );
 }

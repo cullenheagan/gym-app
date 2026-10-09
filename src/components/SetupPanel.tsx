@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { PHOTO_BUCKET, compressPhoto, uploadPhoto } from "@/lib/photo";
+import { cacheKey, readCache, writeCache } from "@/lib/cache";
+import { explain } from "@/lib/net";
 
 type Setup = { id: string; name: string; pin_position: string | null; photo_path: string | null };
 
@@ -45,12 +47,16 @@ export default function SetupPanel({
       q = gymId ? q.eq("gym_id", gymId) : q.is("gym_id", null);
       const res = await q;
       if (cancelled) return;
+      const ck = cacheKey(userId, `setups:${exerciseId}:${gymId || "none"}`);
       if (res.error) {
-        setError(res.error.message);
-        setSetups([]);
+        // No connection: use the copy saved on this device, quietly.
+        const copy = readCache<Setup[]>(ck);
+        setSetups(copy ?? []);
+        if (!copy) setError(null);
         return;
       }
       const list = (res.data ?? []) as Setup[];
+      writeCache(ck, list);
       setSetups(list);
       // A setup remembered from another gym does not apply here.
       if (value && !list.some((s) => s.id === value)) onChange(null);
@@ -68,7 +74,7 @@ export default function SetupPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, exerciseId, gymId]);
+  }, [db, userId, exerciseId, gymId]);
 
   function reset() {
     if (preview) URL.revokeObjectURL(preview);
@@ -88,7 +94,7 @@ export default function SetupPanel({
       setBlob(b);
       setPreview(URL.createObjectURL(b));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not read that photo.");
+      setError(explain(e instanceof Error ? e.message : null, "Could not read that photo."));
     }
   }
 
@@ -113,7 +119,7 @@ export default function SetupPanel({
       .single();
     if (ins.error || !ins.data) {
       setBusy(false);
-      setError(ins.error?.message ?? "Could not save the setup.");
+      setError(explain(ins.error?.message, "Could not save the setup."));
       return;
     }
     let made = ins.data as Setup;

@@ -6,6 +6,9 @@ import { type Unit, formatWeight, fromDisplay, toDisplay } from "@/lib/units";
 import { formatClock, formatDate } from "@/lib/format";
 import History, { type RepeatPlan } from "./History";
 import SetupPanel from "./SetupPanel";
+import { cacheKey, readCache, writeCache } from "@/lib/cache";
+import { explain, isOffline, looksLikeNetworkError } from "@/lib/net";
+import { type OutboxSet, type OutboxWorkout, enqueue, flushOutbox, loadOutbox } from "@/lib/outbox";
 import { compressPhoto, uploadPhoto } from "@/lib/photo";
 
 type SetRow = {
@@ -57,7 +60,20 @@ const newId = () => crypto.randomUUID();
 function Thumb({ url, size = 40 }: { url?: string; size?: number }) {
   if (!url) return null;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt="" width={size} height={size} className="shrink-0 rounded-lg object-cover" style={{ width: size, height: size }} />;
+  return (
+    <img
+      src={url}
+      alt=""
+      width={size}
+      height={size}
+      className="shrink-0 rounded-lg object-cover"
+      style={{ width: size, height: size }}
+      onError={(e) => {
+        // Photo links need a connection; hide the broken picture when offline.
+        e.currentTarget.style.visibility = "hidden";
+      }}
+    />
+  );
 }
 
 function CheckIcon() {
@@ -76,11 +92,40 @@ function ChevronDown({ className }: { className?: string }) {
   );
 }
 
+type Previous = { sets: PastSet[]; date: string | null; setupId: string | null };
+
+// Workouts finished offline that have not reached the database yet still count as "last time".
+function pendingPrevious(userId: string, exerciseId: string): Previous | null {
+  let best: OutboxSet | null = null;
+  for (const item of loadOutbox(userId)) {
+    for (const st of item.sets) {
+      if (st.exercise_id === exerciseId && (!best || Date.parse(st.completed_at) > Date.parse(best.completed_at))) {
+        best = st;
+      }
+    }
+  }
+  if (!best) return null;
+  const workoutId = best.workout_id;
+  const sets: PastSet[] = loadOutbox(userId)
+    .flatMap((i) => i.sets)
+    .filter((st) => st.workout_id === workoutId && st.exercise_id === exerciseId)
+    .map((st) => ({
+      workout_id: st.workout_id,
+      set_index: st.set_index,
+      weight_kg: st.weight_kg,
+      reps: st.reps,
+      completed_at: st.completed_at,
+      setup_id: st.setup_id,
+    }))
+    .sort((x, y) => x.set_index - y.set_index);
+  return { sets, date: best.completed_at, setupId: best.setup_id };
+}
+
 // The sets from the most recent time this exercise was logged, and when that was.
-async function loadPrevious(
-  db: SupabaseClient,
-  exerciseId: string,
-): Promise<{ sets: PastSet[]; date: string | null; setupId: string | null }> {
+// Falls back to a copy saved on this device when there is no connection.
+async function loadPrevious(db: SupabaseClient, userId: string, exerciseId: string): Promise<Previous> {
+  const ck = cacheKey(userId, `prev:${exerciseId}`);
+  let result: Previous = { sets: [], date: null, setupId: null };
   const { data, error } = await db
     .from("workout_sets")
     .select("workout_id,set_index,weight_kg,reps,completed_at,setup_id")
@@ -88,16 +133,23 @@ async function loadPrevious(
     .not("completed_at", "is", null)
     .order("completed_at", { ascending: false })
     .limit(30);
-  if (error || !data || data.length === 0) return { sets: [], date: null, setupId: null };
-  const rows = data as PastSet[];
-  const last = rows[0].workout_id;
-  return {
-    sets: rows
-      .filter((r: PastSet) => r.workout_id === last)
-      .sort((a: PastSet, b: PastSet) => a.set_index - b.set_index),
-    date: rows[0].completed_at,
-    setupId: rows[0].setup_id,
-  };
+  if (error) {
+    result = readCache<Previous>(ck) ?? result;
+  } else if (data && data.length > 0) {
+    const rows = data as PastSet[];
+    const last = rows[0].workout_id;
+    result = {
+      sets: rows
+        .filter((r: PastSet) => r.workout_id === last)
+        .sort((a: PastSet, b: PastSet) => a.set_index - b.set_index),
+      date: rows[0].completed_at,
+      setupId: rows[0].setup_id,
+    };
+    writeCache(ck, result);
+  }
+  const waiting = pendingPrevious(userId, exerciseId);
+  if (waiting && (!result.date || Date.parse(waiting.date ?? "") > Date.parse(result.date))) return waiting;
+  return result;
 }
 
 export default function Workout({
@@ -136,6 +188,9 @@ export default function Workout({
   const [view, setView] = useState<"log" | "history">("log");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
+  const [pending, setPending] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [online, setOnline] = useState(true);
   const [now, setNow] = useState(() => Date.now());
   const draftKey = `draft:${userId}`;
 
@@ -186,6 +241,15 @@ export default function Workout({
       if (t === "light" || t === "dark") setTheme(t);
     } catch {}
 
+    // Show the copy saved on this device straight away; fresh data replaces it when it arrives.
+    const savedGyms = readCache<Gym[]>(cacheKey(userId, "gyms"));
+    if (savedGyms) {
+      setGyms(savedGyms);
+      if (savedGyms.length > 0) setGymId((cur) => cur || savedGyms[0].id);
+    }
+    const savedCatalog = readCache<Catalog[]>(cacheKey(userId, "catalog"));
+    if (savedCatalog) setCatalog(savedCatalog);
+
     let cancelled = false;
     (async () => {
       const profile = await db.from("profiles").select("unit").eq("id", userId).maybeSingle();
@@ -195,6 +259,7 @@ export default function Workout({
       const res = await db.from("gyms").select("id,name").order("created_at", { ascending: true });
       if (!cancelled && res.data) {
         const list = res.data as Gym[];
+        writeCache(cacheKey(userId, "gyms"), list);
         setGyms(list);
         if (list.length > 0) setGymId((cur) => cur || list[0].id);
       }
@@ -204,6 +269,7 @@ export default function Workout({
         .order("name", { ascending: true });
       if (!cancelled && cat.data) {
         const list = cat.data as Catalog[];
+        writeCache(cacheKey(userId, "catalog"), list);
         setCatalog(list);
         const paths = list.map((c) => c.photo_path).filter((p): p is string => !!p);
         if (paths.length > 0) {
@@ -220,6 +286,67 @@ export default function Workout({
       cancelled = true;
     };
   }, [db, userId]);
+
+  async function syncNow() {
+    if (loadOutbox(userId).length === 0) {
+      setPending(0);
+      return;
+    }
+    setSyncing(true);
+    const r = await flushOutbox(db, userId);
+    setSyncing(false);
+    setPending(r.left);
+    if (r.sent > 0) {
+      setMessage({
+        kind: "ok",
+        text: r.sent === 1 ? "Saved your workout to your account." : `Saved ${r.sent} workouts to your account.`,
+      });
+    }
+  }
+
+  // Send finished workouts that are waiting: on open, when the connection comes back,
+  // when the app is reopened, and every 30 seconds while something is waiting.
+  useEffect(() => {
+    setPending(loadOutbox(userId).length);
+    setOnline(navigator.onLine);
+    const goOnline = () => {
+      setOnline(true);
+      syncNow();
+    };
+    const goOffline = () => setOnline(false);
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) syncNow();
+    };
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    document.addEventListener("visibilitychange", onVisible);
+    syncNow();
+    const id = window.setInterval(() => {
+      if (navigator.onLine && loadOutbox(userId).length > 0) syncNow();
+    }, 30000);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, userId]);
+
+  function handleSignOut() {
+    const n = loadOutbox(userId).length;
+    if (
+      n > 0 &&
+      !window.confirm(
+        `${n} ${n === 1 ? "workout hasn't" : "workouts haven't"} synced yet. ${
+          n === 1 ? "It stays" : "They stay"
+        } on this phone and will sync the next time you sign in here. Sign out anyway?`,
+      )
+    ) {
+      return;
+    }
+    onSignOut();
+  }
 
   function chooseUnit(u: Unit) {
     setUnit(u);
@@ -246,7 +373,7 @@ export default function Workout({
     if (!name) return;
     const { data, error } = await db.from("gyms").insert({ user_id: userId, name }).select("id,name").single();
     if (error || !data) {
-      setMessage({ kind: "error", text: error?.message ?? "Could not add the gym." });
+      setMessage({ kind: "error", text: explain(error?.message, "Could not add the gym.") });
       return;
     }
     const gym = data as Gym;
@@ -289,7 +416,7 @@ export default function Workout({
       setPhotoBlob(blob);
       setPhotoPreview(URL.createObjectURL(blob));
     } catch (e) {
-      setMessage({ kind: "error", text: e instanceof Error ? e.message : "Could not read that photo." });
+      setMessage({ kind: "error", text: explain(e instanceof Error ? e.message : null, "Could not read that photo.") });
     }
   }
 
@@ -310,7 +437,7 @@ export default function Workout({
       if (url) setPhotoUrls((m) => ({ ...m, [path]: url }));
       setMessage(null);
     } catch (e) {
-      setMessage({ kind: "error", text: e instanceof Error ? e.message : "Could not save the photo." });
+      setMessage({ kind: "error", text: explain(e instanceof Error ? e.message : null, "Could not save the photo.") });
     }
   }
 
@@ -382,7 +509,7 @@ export default function Workout({
   async function pickExercise(c: Catalog) {
     closePicker();
     setMessage(null);
-    const prev = await loadPrevious(db, c.id);
+    const prev = await loadPrevious(db, userId, c.id);
     addToWorkout(c, prev.sets, prev.date, prev.setupId);
   }
 
@@ -408,7 +535,7 @@ export default function Workout({
       .select("id,name,equipment_type,gym_id,photo_path")
       .single();
     if (error || !data) {
-      setMessage({ kind: "error", text: error?.message ?? "Could not create the exercise." });
+      setMessage({ kind: "error", text: explain(error?.message, "Could not create the exercise.") });
       return;
     }
     let made = data as Catalog;
@@ -490,26 +617,10 @@ export default function Workout({
     setSaving(true);
     setMessage(null);
     const finishedAt = new Date().toISOString();
-
-    const w = await db
-      .from("workouts")
-      .insert({
-        user_id: userId,
-        gym_id: gymId || null,
-        name: title.trim() || "Workout",
-        started_at: startedAt,
-        ended_at: finishedAt,
-      })
-      .select("id")
-      .single();
-    if (w.error || !w.data) {
-      setSaving(false);
-      setMessage({ kind: "error", text: w.error?.message ?? "Could not save the workout." });
-      return;
-    }
-    const workoutId = (w.data as { id: string }).id;
+    const workoutId = newId();
 
     // Drafts from before the picker existed may hold exercises that are not in the library yet.
+    // Those need a connection to create; everything else can be saved with no signal.
     const idsByName = new Map<string, string>();
     for (const ex of withDone) {
       const known = ex.exerciseId ?? idsByName.get(ex.name);
@@ -523,22 +634,29 @@ export default function Workout({
         .select("id")
         .single();
       if (made.error || !made.data) {
-        await db.from("workouts").delete().eq("id", workoutId);
         setSaving(false);
-        setMessage({ kind: "error", text: made.error?.message ?? "Could not save an exercise." });
+        setMessage({ kind: "error", text: explain(made.error?.message, "Could not save an exercise.") });
         return;
       }
       idsByName.set(ex.name, (made.data as { id: string }).id);
     }
 
-    const rows = withDone.flatMap((ex) =>
+    const workout: OutboxWorkout = {
+      id: workoutId,
+      user_id: userId,
+      gym_id: gymId || null,
+      name: title.trim() || "Workout",
+      started_at: startedAt,
+      ended_at: finishedAt,
+    };
+    const sets: OutboxSet[] = withDone.flatMap((ex) =>
       ex.sets
         .filter((s) => s.done)
         .map((s, i) => ({
           id: s.id,
           user_id: userId,
           workout_id: workoutId,
-          exercise_id: ex.exerciseId ?? idsByName.get(ex.name),
+          exercise_id: (ex.exerciseId ?? idsByName.get(ex.name)) as string,
           set_index: i,
           set_type: "working",
           weight_kg: s.kg,
@@ -547,19 +665,36 @@ export default function Workout({
           setup_id: ex.setupId ?? null,
         })),
     );
-    const ins = await db.from("workout_sets").insert(rows);
-    if (ins.error) {
-      await db.from("workouts").delete().eq("id", workoutId);
+
+    // Save on this phone first. Only after that is the screen cleared, so nothing can be lost.
+    if (!enqueue(userId, workout, sets)) {
       setSaving(false);
-      setMessage({ kind: "error", text: ins.error.message });
+      setMessage({
+        kind: "error",
+        text: "Could not store the workout on this phone (storage is full or blocked). Your sets are still on screen, so try again.",
+      });
       return;
     }
-
-    setSaving(false);
     setExercises([]);
     setTitle("Workout");
     setStartedAt(new Date().toISOString());
-    setMessage({ kind: "ok", text: "Workout saved." });
+    setPending(loadOutbox(userId).length);
+
+    const r = await flushOutbox(db, userId);
+    setPending(r.left);
+    setSaving(false);
+    if (r.left === 0) {
+      setMessage({ kind: "ok", text: "Workout saved." });
+    } else {
+      const err = loadOutbox(userId)[0]?.lastError;
+      setMessage({
+        kind: "ok",
+        text:
+          err && !looksLikeNetworkError(err) && !isOffline()
+            ? `Saved on this phone, but syncing failed: ${err}. It will keep retrying.`
+            : "Saved on this phone. It will sync when you have signal.",
+      });
+    }
   }
 
   const doneSets = exercises.flatMap((e) => e.sets).filter((s) => s.done);
@@ -591,7 +726,7 @@ export default function Workout({
         </button>
         <button
           type="button"
-          onClick={onSignOut}
+          onClick={handleSignOut}
           className="h-11 truncate px-3 text-sm font-semibold text-muted"
           aria-label={`Sign out ${email}`}
         >
@@ -630,7 +765,25 @@ export default function Workout({
         ))}
       </div>
 
-      {view === "history" && <History db={db} unit={unit} onRepeat={repeatWorkout} />}
+      {(!online || pending > 0) && (
+        <div
+          role="status"
+          className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-[14px] bg-tint px-4 py-3 text-[13px] font-semibold text-accent"
+        >
+          <span>
+            {!online ? "Offline. Your sets are saved on this phone." : ""}
+            {!online && pending > 0 ? " " : ""}
+            {pending > 0 ? `${pending} ${pending === 1 ? "workout" : "workouts"} waiting to sync.` : ""}
+          </span>
+          {pending > 0 && online && (
+            <button type="button" onClick={syncNow} disabled={syncing} className="shrink-0 font-bold underline">
+              {syncing ? "Syncing..." : "Sync now"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {view === "history" && <History db={db} userId={userId} unit={unit} onRepeat={repeatWorkout} />}
 
       <header className={view === "log" ? "px-5 pt-4" : "hidden"}>
         <label htmlFor="title" className="sr-only">
