@@ -3,6 +3,8 @@
 Newest first. Each entry says what changed and why. Mirrored in the Notion "Gym App" wiki.
 
 ## 2026-10-09
+- Photos from your camera roll: every photo button (machine, existing machine, bench setup, gym) now lets the phone offer Take Photo or Photo Library instead of forcing the camera.
+- Remove machines: in the Gyms tab, each machine has a Remove button (tap twice). It disappears from the exercise picker and the gym's list, but its logged sets stay in History, Progress and the CSV. Removed machines can be restored from "Show removed machines", and adding a machine with the same name brings the old one back. Migration 0009 adds an optional `exercises.archived_at` column (applied; existing data untouched).
 - Warm-up discovery: set numbers are now round buttons (blue with a W when it is a warm-up), and a hint line above the sets says "Tap a set number to mark it as a warm-up" until you mark your first warm-up.
 - Workout naming: the log screen now has a pencil button next to the workout name and a row of tappable name suggestions (up to four names you have used before, most used first, then Push Day, Pull Day, Leg Day, Upper, Lower, Full Body, Arms). The row shows until you add the first exercise; the name stays editable.
 - Warm-up sets: tap a set's number to switch it between a working set and a warm-up (shown as W on a tinted row; working sets are numbered on their own). Warm-ups are saved but left out of Total weight lifted, History totals and set counts, the Previous column, Progress and suggestions. History marks them with W. No database change (uses the existing set type).

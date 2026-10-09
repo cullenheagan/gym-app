@@ -273,7 +273,6 @@ export default function SetupPanel({
         ref={fileInput}
         type="file"
         accept="image/*"
-        capture="environment"
         className="hidden"
         onChange={(e) => {
           onFile(e.target.files?.[0]);

@@ -7,7 +7,14 @@ import { equipmentLabel } from "@/lib/equipment";
 import { PHOTO_BUCKET, compressPhoto, uploadPhoto } from "@/lib/photo";
 import { explain } from "@/lib/net";
 
-type Machine = { id: string; name: string; equipment_type: string; gym_id: string | null; photo_path: string | null };
+type Machine = {
+  id: string;
+  name: string;
+  equipment_type: string;
+  gym_id: string | null;
+  photo_path: string | null;
+  archived_at?: string | null;
+};
 
 function Chevron({ open }: { open: boolean }) {
   return (
@@ -44,6 +51,7 @@ export default function Gyms({
   userId,
   gyms,
   catalog,
+  onCatalogChange,
   machineUrls,
   currentGymId,
   onChange,
@@ -52,6 +60,7 @@ export default function Gyms({
   userId: string;
   gyms: Gym[];
   catalog: Machine[];
+  onCatalogChange: (update: (all: Machine[]) => Machine[]) => void;
   machineUrls: Record<string, string>;
   currentGymId: string;
   onChange: (update: (all: Gym[]) => Gym[]) => void;
@@ -61,12 +70,36 @@ export default function Gyms({
   const [openId, setOpenId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [showRemoved, setShowRemoved] = useState(false);
+  const [confirmMachine, setConfirmMachine] = useState<string | null>(null);
+  const [removedMachinesOpen, setRemovedMachinesOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const photoTarget = useRef<string | null>(null);
+
+  // Removing a machine only hides it (archived_at); its logged sets stay in History and Progress.
+  async function setMachineRemoved(id: string, removed: boolean) {
+    if (removed && confirmMachine !== id) {
+      setConfirmMachine(id);
+      window.setTimeout(() => setConfirmMachine((cur) => (cur === id ? null : cur)), 4000);
+      return;
+    }
+    setConfirmMachine(null);
+    setError(null);
+    const stamp = removed ? new Date().toISOString() : null;
+    const res = await db.from("exercises").update({ archived_at: stamp }).eq("id", id);
+    if (res.error) {
+      setError(
+        /archived_at/.test(res.error.message)
+          ? "Removing machines needs migration 0009 in the Supabase SQL Editor first."
+          : explain(res.error.message, "Could not update that machine."),
+      );
+      return;
+    }
+    onCatalogChange((all) => all.map((m) => (m.id === id ? { ...m, archived_at: stamp } : m)));
+  }
 
   const active = gyms.filter((g) => !g.archived_at);
   const removed = gyms.filter((g) => g.archived_at);
@@ -189,7 +222,8 @@ export default function Gyms({
 
       {active.map((g) => {
         const open = openId === g.id;
-        const machines = catalog.filter((c) => c.gym_id === g.id);
+        const machines = catalog.filter((c) => c.gym_id === g.id && !c.archived_at);
+        const removedMachines = catalog.filter((c) => c.gym_id === g.id && c.archived_at);
         const photo = g.photo_path ? urls[g.photo_path] : undefined;
         const workouts = counts[g.id] ?? 0;
         return (
@@ -255,10 +289,46 @@ export default function Gyms({
                               {equipmentLabel(m.equipment_type)}
                             </span>
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => setMachineRemoved(m.id, true)}
+                            className="ml-auto h-9 shrink-0 rounded-lg px-3 text-[13px] font-bold text-red-600"
+                          >
+                            {confirmMachine === m.id ? "Tap again" : "Remove"}
+                          </button>
                         </li>
                       );
                     })}
                   </ul>
+                )}
+
+                {removedMachines.length > 0 && (
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setRemovedMachinesOpen(removedMachinesOpen === g.id ? null : g.id)}
+                      aria-expanded={removedMachinesOpen === g.id}
+                      className="text-[13px] font-bold text-accent"
+                    >
+                      {removedMachinesOpen === g.id ? "Hide" : "Show"} removed machines ({removedMachines.length})
+                    </button>
+                    {removedMachinesOpen === g.id && (
+                      <ul className="mt-2 flex flex-col gap-2">
+                        {removedMachines.map((m) => (
+                          <li key={m.id} className="flex items-center gap-3">
+                            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-muted">{m.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => setMachineRemoved(m.id, false)}
+                              className="h-9 shrink-0 rounded-lg bg-field px-3 text-[13px] font-bold"
+                            >
+                              Restore
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 )}
 
                 <button
@@ -354,7 +424,6 @@ export default function Gyms({
         ref={fileInput}
         type="file"
         accept="image/*"
-        capture="environment"
         className="hidden"
         onChange={(e) => {
           onPhoto(e.target.files?.[0]);

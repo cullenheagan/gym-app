@@ -43,7 +43,14 @@ type Exercise = {
 
 
 // An exercise in the account's library. gym_id null means it is available at every gym.
-type Catalog = { id: string; name: string; equipment_type: string; gym_id: string | null; photo_path: string | null };
+type Catalog = {
+  id: string;
+  name: string;
+  equipment_type: string;
+  gym_id: string | null;
+  photo_path: string | null;
+  archived_at?: string | null; // removed from your lists; history is kept
+};
 
 type PastSet = {
   workout_id: string;
@@ -313,12 +320,21 @@ export default function Workout({
         if (firstActive) setGymId((cur) => cur || firstActive.id);
         setGymsLoaded(true);
       }
-      const cat = await db
+      const catFull = await db
         .from("exercises")
-        .select("id,name,equipment_type,gym_id,photo_path")
+        .select("id,name,equipment_type,gym_id,photo_path,archived_at")
         .order("name", { ascending: true });
-      if (!cancelled && cat.data) {
-        const list = cat.data as Catalog[];
+      let catRows = catFull.error ? null : (catFull.data as Catalog[] | null);
+      // Until migration 0009 is run the column does not exist; fall back so nothing breaks.
+      if (catFull.error && /archived_at/.test(catFull.error.message)) {
+        const basic = await db
+          .from("exercises")
+          .select("id,name,equipment_type,gym_id,photo_path")
+          .order("name", { ascending: true });
+        catRows = basic.error ? null : (basic.data as Catalog[] | null);
+      }
+      if (!cancelled && catRows) {
+        const list = catRows;
         writeCache(cacheKey(userId, "catalog"), list);
         setCatalog(list);
         const paths = list.map((c) => c.photo_path).filter((p): p is string => !!p);
@@ -456,7 +472,7 @@ export default function Workout({
   }
 
   // Exercises you can pick right now: this gym's equipment plus anything that works anywhere.
-  const available = catalog.filter((c) => c.gym_id === null || c.gym_id === gymId);
+  const available = catalog.filter((c) => !c.archived_at && (c.gym_id === null || c.gym_id === gymId));
   const needle = query.trim().toLowerCase();
   const matches = available.filter((c) => c.name.toLowerCase().includes(needle));
   const exact = available.find((c) => c.name.toLowerCase() === needle);
@@ -609,6 +625,20 @@ export default function Workout({
     if (!name) return;
     if (exact) {
       await pickExercise(exact);
+      return;
+    }
+    const removedSame = catalog.find(
+      (c) => c.archived_at && c.name.toLowerCase() === name.toLowerCase() && (c.gym_id === null || c.gym_id === gymId),
+    );
+    if (removedSame) {
+      const res = await db.from("exercises").update({ archived_at: null }).eq("id", removedSame.id);
+      if (res.error) {
+        setMessage({ kind: "error", text: explain(res.error.message, "Could not bring that machine back.") });
+        return;
+      }
+      const revived = { ...removedSame, archived_at: null };
+      setCatalog((all) => all.map((c) => (c.id === revived.id ? revived : c)));
+      await pickExercise(revived);
       return;
     }
     if (!chosenType.anyGym && !gymId) {
@@ -949,6 +979,7 @@ export default function Workout({
           userId={userId}
           gyms={allGyms}
           catalog={catalog}
+          onCatalogChange={(update) => setCatalog(update)}
           machineUrls={photoUrls}
           currentGymId={gymId}
           onChange={(update) => setAllGyms(update)}
@@ -1420,7 +1451,6 @@ export default function Workout({
         ref={photoInput}
         type="file"
         accept="image/*"
-        capture="environment"
         className="hidden"
         onChange={(e) => {
           onPhotoChosen(e.target.files?.[0]);
@@ -1432,7 +1462,6 @@ export default function Workout({
         ref={existingPhotoInput}
         type="file"
         accept="image/*"
-        capture="environment"
         className="hidden"
         onChange={(e) => {
           onExistingPhoto(e.target.files?.[0]);
