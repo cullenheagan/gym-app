@@ -3,6 +3,7 @@
 Newest first. Each entry says what changed and why. Mirrored in the Notion "Gym App" wiki.
 
 ## 2026-10-09
+- New Progress tab: one chart per exercise from your logged working sets (warm-ups skipped). Pick Est. 1RM (default), Top weight or Volume, and a range of 1M, 3M, 6M or All. Shows Best, Latest and Change, marks new personal bests, and lists recent sessions. Tap or hover the chart to read any session. Works in lb or kg and keeps a saved copy for offline. No database change.
 - Database security: blocked the sign-up function `handle_new_user()` from being called through the public API (migration 0007). Sign-up still creates your profile as before. The Supabase security check now only reports leaked-password protection, which is a dashboard setting.
 - History filters: pick a gym and/or a workout type (the workout name, like "Push Day"; spellings that only differ by capital letters or spaces count as one). Shows how many match, with Clear filters. History now loads up to 200 workouts.
 - New Gyms tab: every gym with its photo, the machines saved at it and how many workouts were logged there. Add a gym, add or change its photo, and remove it from the gym dropdown. Removing only hides it (workouts and machines are kept), and removed gyms can be restored. Needs migration 0006; until it is run, the rest of the app still works.

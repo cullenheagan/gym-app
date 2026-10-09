@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Unit, formatWeight, fromDisplay, toDisplay } from "@/lib/units";
 import { formatClock, formatDate } from "@/lib/format";
+import Progress from "./Progress";
 import History, { type RepeatPlan } from "./History";
 import SetupPanel from "./SetupPanel";
 import Gyms from "./Gyms";
@@ -179,7 +180,7 @@ export default function Workout({
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  const [view, setView] = useState<"log" | "history" | "gyms">("log");
+  const [view, setView] = useState<"log" | "history" | "gyms" | "progress">("log");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [pending, setPending] = useState(0);
@@ -768,7 +769,7 @@ export default function Workout({
       </div>
 
       <div className="mx-4 mt-4 flex rounded-xl bg-line p-[3px]" role="group" aria-label="Screen">
-        {(["log", "history", "gyms"] as const).map((v) => (
+        {(["log", "history", "gyms", "progress"] as const).map((v) => (
           <button
             key={v}
             type="button"
@@ -778,7 +779,7 @@ export default function Workout({
               view === v ? "bg-card text-ink" : "text-muted"
             }`}
           >
-            {v === "log" ? "Log" : v === "history" ? "History" : "Gyms"}
+            {v === "log" ? "Log" : v === "history" ? "History" : v === "gyms" ? "Gyms" : "Progress"}
           </button>
         ))}
       </div>
@@ -802,6 +803,8 @@ export default function Workout({
       )}
 
       {view === "history" && <History db={db} userId={userId} unit={unit} onRepeat={repeatWorkout} />}
+
+      {view === "progress" && <Progress db={db} userId={userId} unit={unit} />}
 
       {view === "gyms" && (
         <Gyms
