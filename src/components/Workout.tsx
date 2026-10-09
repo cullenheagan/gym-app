@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Unit, formatWeight, fromDisplay, toDisplay } from "@/lib/units";
 import { formatClock, formatDate } from "@/lib/format";
+import Home from "./Home";
 import Progress from "./Progress";
 import History, { type RepeatPlan } from "./History";
 import SetupPanel from "./SetupPanel";
@@ -180,7 +181,7 @@ export default function Workout({
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  const [view, setView] = useState<"log" | "history" | "gyms" | "progress">("log");
+  const [view, setView] = useState<"home" | "log" | "history" | "gyms" | "progress">("home");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [pending, setPending] = useState(0);
@@ -494,6 +495,13 @@ export default function Workout({
     setView("log");
   }
 
+  // Begin an empty workout and open the log screen.
+  function startWorkout() {
+    setStartedAt(new Date().toISOString());
+    setMessage(null);
+    setView("log");
+  }
+
   function setSetup(exKey: string, setupId: string | null) {
     setExercises((all) => all.map((ex) => (ex.key === exKey ? { ...ex, setupId } : ex)));
   }
@@ -625,6 +633,7 @@ export default function Workout({
     setStartedAt(new Date().toISOString());
     setConfirmDiscard(false);
     setMessage(null);
+    setView("home");
   }
 
   async function finishWorkout() {
@@ -698,6 +707,7 @@ export default function Workout({
     setTitle("Workout");
     setStartedAt(new Date().toISOString());
     setPending(loadOutbox(userId).length);
+    setView("home");
 
     const r = await flushOutbox(db, userId);
     setPending(r.left);
@@ -768,21 +778,29 @@ export default function Workout({
         </div>
       </div>
 
-      <div className="mx-4 mt-4 flex rounded-xl bg-line p-[3px]" role="group" aria-label="Screen">
-        {(["log", "history", "gyms", "progress"] as const).map((v) => (
-          <button
-            key={v}
-            type="button"
-            onClick={() => setView(v)}
-            aria-pressed={view === v}
-            className={`h-10 flex-1 rounded-[10px] text-sm font-bold ${
-              view === v ? "bg-card text-ink" : "text-muted"
-            }`}
-          >
-            {v === "log" ? "Log" : v === "history" ? "History" : v === "gyms" ? "Gyms" : "Progress"}
+      {view !== "log" ? (
+        <div className="mx-4 mt-4 flex rounded-xl bg-line p-[3px]" role="group" aria-label="Screen">
+          {(["home", "history", "gyms", "progress"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              aria-pressed={view === v}
+              className={`h-10 flex-1 rounded-[10px] text-sm font-bold ${
+                view === v ? "bg-card text-ink" : "text-muted"
+              }`}
+            >
+              {v === "home" ? "Home" : v === "history" ? "History" : v === "gyms" ? "Gyms" : "Progress"}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="mx-4 mt-4">
+          <button type="button" onClick={() => setView("home")} className="h-10 px-1 text-sm font-bold text-accent">
+            {"\u2039 Home"}
           </button>
-        ))}
-      </div>
+        </div>
+      )}
 
       {(!online || pending > 0) && (
         <div
@@ -800,6 +818,25 @@ export default function Workout({
             </button>
           )}
         </div>
+      )}
+
+      {view === "home" && message && (
+        <p role="status" className="mx-5 mt-3 text-sm font-semibold text-done">
+          {message.text}
+        </p>
+      )}
+
+      {view === "home" && (
+        <Home
+          db={db}
+          userId={userId}
+          unit={unit}
+          inProgress={active}
+          elapsedMs={now - Date.parse(startedAt)}
+          onStart={startWorkout}
+          onResume={() => setView("log")}
+          onTemplate={repeatWorkout}
+        />
       )}
 
       {view === "history" && <History db={db} userId={userId} unit={unit} onRepeat={repeatWorkout} />}

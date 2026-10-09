@@ -35,7 +35,7 @@ type RawSet = {
   exercise: ExRef | ExRef[] | null;
   setup: SetupRef | SetupRef[] | null;
 };
-type RawWorkout = {
+export type RawWorkout = {
   id: string;
   name: string;
   started_at: string;
@@ -52,7 +52,7 @@ function one<T>(v: T | T[] | null | undefined): T | null {
 
 const ms = (iso: string | null) => (iso ? Date.parse(iso) : NaN);
 
-function summarize(w: RawWorkout) {
+export function summarize(w: RawWorkout) {
   const groups = new Map<string, RawSet[]>();
   for (const s of w.workout_sets) {
     const name = one(s.exercise)?.name ?? "Unknown exercise";
@@ -102,7 +102,7 @@ function summarize(w: RawWorkout) {
   return { exercises, volumeKg, setCount: w.workout_sets.length, total };
 }
 
-function toPlan(w: RawWorkout, sum: ReturnType<typeof summarize>): RepeatPlan {
+export function toPlan(w: RawWorkout, sum: ReturnType<typeof summarize>): RepeatPlan {
   return {
     name: w.name,
     gymId: w.gym_id,
