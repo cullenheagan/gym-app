@@ -921,7 +921,8 @@ export default function Workout({
   }
 
   function discardWorkout() {
-    if (!confirmDiscard) {
+    // With nothing logged there is nothing to lose, so cancel straight away.
+    if (exercises.length > 0 && !confirmDiscard) {
       setConfirmDiscard(true);
       window.setTimeout(() => setConfirmDiscard(false), 4000);
       return;
@@ -1727,6 +1728,12 @@ export default function Workout({
           >
             {message.text}
           </p>
+        )}
+
+        {exercises.length === 0 && (
+          <button type="button" onClick={discardWorkout} className="h-11 w-full text-sm font-bold text-muted">
+            Cancel workout
+          </button>
         )}
 
         {exercises.length > 0 && (
