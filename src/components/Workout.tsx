@@ -9,6 +9,7 @@ import { normName } from "@/lib/history-filter";
 import { workoutNameChips } from "@/lib/workout-names";
 import Home from "./Home";
 import GymPicker from "./GymPicker";
+import BottomBar, { type Section } from "./BottomBar";
 import Settings, { type ThemeChoice } from "./Settings";
 import Avatar from "./Avatar";
 import { avatarKey, avatarPath, clearPending, compressAvatar, dataUrlToBlob, takePending } from "@/lib/avatar";
@@ -234,6 +235,10 @@ export default function Workout({
       return null;
     }
   });
+  // An empty workout counts as in progress from the moment Start workout is tapped.
+  const [workoutStarted, setWorkoutStarted] = useState(false);
+  // The Train sub-tab to come back to when the Train button is tapped.
+  const [trainTab, setTrainTab] = useState<"history" | "gyms" | "progress">("history");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [pending, setPending] = useState(0);
@@ -273,6 +278,7 @@ export default function Workout({
 
   // The workout clock ticks while there is something in the workout.
   const active = exercises.length > 0;
+  const inProgress = active || workoutStarted;
   useEffect(() => {
     if (!active) return;
     setNow(Date.now());
@@ -666,6 +672,7 @@ export default function Workout({
 
   // Begin an empty workout and open the log screen.
   function startWorkout() {
+    setWorkoutStarted(true);
     setStartedAt(new Date().toISOString());
     setMessage(null);
     setView("log");
@@ -840,6 +847,7 @@ export default function Workout({
       return;
     }
     setExercises([]);
+    setWorkoutStarted(false);
     setTitle("Workout");
     setStartedAt(new Date().toISOString());
     setConfirmDiscard(false);
@@ -915,6 +923,7 @@ export default function Workout({
       return;
     }
     setExercises([]);
+    setWorkoutStarted(false);
     setTitle("Workout");
     setStartedAt(new Date().toISOString());
     setPending(loadOutbox(userId).length);
@@ -952,7 +961,7 @@ export default function Workout({
   });
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col pb-28">
+    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col pb-40">
       <div className="flex items-center justify-end px-4 pt-4">
         <button
           type="button"
@@ -964,27 +973,27 @@ export default function Workout({
         </button>
       </div>
 
-      {view !== "log" && view !== "settings" ? (
-        <div className="mx-4 mt-4 flex rounded-xl bg-line p-[3px]" role="group" aria-label="Screen">
-          {(["home", "history", "gyms", "progress"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setView(v)}
-              aria-pressed={view === v}
-              className={`h-10 flex-1 rounded-[10px] text-sm font-bold ${
-                view === v ? "bg-card text-ink" : "text-muted"
-              }`}
-            >
-              {v === "home" ? "Home" : v === "history" ? "History" : v === "gyms" ? "Gyms" : "Progress"}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="mx-4 mt-4">
-          <button type="button" onClick={() => setView("home")} className="h-10 px-1 text-sm font-bold text-accent">
-            {"\u2039 Home"}
-          </button>
+      {(view === "log" || view === "history" || view === "gyms" || view === "progress") && (
+        <div className="mx-4 mt-4 flex rounded-xl bg-line p-[3px]" role="group" aria-label="Train">
+          {([...(inProgress || view === "log" ? (["log"] as const) : []), "history", "gyms", "progress"] as const).map(
+            (v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => {
+                  setView(v);
+                  if (v !== "log") setTrainTab(v);
+                }}
+                aria-pressed={view === v}
+                className={`flex h-10 flex-1 items-center justify-center gap-1.5 rounded-[10px] text-sm font-bold ${
+                  view === v ? "bg-card text-ink" : "text-muted"
+                }`}
+              >
+                {v === "log" ? "Workout" : v === "history" ? "History" : v === "gyms" ? "Gyms" : "Progress"}
+                {v === "log" && inProgress && <span aria-label="in progress" className="h-2 w-2 rounded-full bg-done" />}
+              </button>
+            ),
+          )}
         </div>
       )}
 
@@ -1019,7 +1028,7 @@ export default function Workout({
           unit={unit}
           name={displayName}
           onProfile={() => setView("settings")}
-          inProgress={active}
+          inProgress={inProgress}
           elapsedMs={now - Date.parse(startedAt)}
           onStart={startWorkout}
           onResume={() => setView("log")}
@@ -1530,7 +1539,7 @@ export default function Workout({
       />
 
       <nav
-        className={`fixed inset-x-4 bottom-6 mx-auto max-w-md items-center gap-2 rounded-full bg-ink p-2 shadow-lg ${
+        className={`fixed inset-x-4 bottom-[88px] mx-auto max-w-md items-center gap-2 rounded-full bg-ink p-2 shadow-lg ${
           view === "log" ? "flex" : "hidden"
         }`}
         aria-label="Workout actions"
@@ -1550,6 +1559,13 @@ export default function Workout({
           </svg>
         </button>
       </nav>
+      <BottomBar
+        selected={view === "home" ? "home" : view === "settings" ? null : "train"}
+        onSelect={(sec: Section) => {
+          if (sec === "home") setView("home");
+          else if (view === "home" || view === "settings") setView(inProgress ? "log" : trainTab);
+        }}
+      />
     </main>
   );
 }
