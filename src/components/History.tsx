@@ -7,6 +7,7 @@ import { formatDate, formatDuration } from "@/lib/format";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { downloadCsv, exportAllSets } from "@/lib/csv";
 import { explain } from "@/lib/net";
+import { applyFilters, gymOptions, typeOptions } from "@/lib/history-filter";
 
 type Named = { name: string };
 type ExRef = { id: string; name: string };
@@ -120,6 +121,54 @@ function toPlan(w: RawWorkout, sum: ReturnType<typeof summarize>): RepeatPlan {
   };
 }
 
+function FilterSelect({
+  label,
+  allLabel,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  allLabel: string;
+  value: string;
+  options: { key: string; label: string; count: number }[];
+  onChange: (key: string) => void;
+}) {
+  return (
+    <div className="relative min-w-0 flex-1">
+      <select
+        aria-label={`Filter by ${label.toLowerCase()}`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`h-10 w-full appearance-none truncate rounded-full border bg-card pl-4 pr-9 text-sm font-semibold ${
+          value ? "border-accent text-accent" : "border-line text-ink"
+        }`}
+      >
+        <option value="">{allLabel}</option>
+        {options.map((o) => (
+          <option key={o.key} value={o.key}>
+            {o.label} ({o.count})
+          </option>
+        ))}
+      </select>
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-muted"
+      >
+        <path d="M6 9l6 6 6-6" />
+      </svg>
+    </div>
+  );
+}
+
 export default function History({
   db,
   userId,
@@ -136,6 +185,8 @@ export default function History({
   const [openId, setOpenId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [saved, setSaved] = useState(false); // showing the copy kept on this device
+  const [gymFilter, setGymFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
   const [exporting, setExporting] = useState(false);
   const [exportNote, setExportNote] = useState<string | null>(null);
 
@@ -148,7 +199,7 @@ export default function History({
           "id,name,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,weight_kg,reps,completed_at,setup_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))",
         )
         .order("started_at", { ascending: false })
-        .limit(50);
+        .limit(200);
       if (cancelled) return;
       const ck = cacheKey(userId, "history");
       if (res.error) {
@@ -162,7 +213,7 @@ export default function History({
         }
       } else {
         const list = (res.data ?? []) as unknown as RawWorkout[];
-        writeCache(ck, list);
+        writeCache(ck, list.slice(0, 50));
         setWorkouts(list);
       }
     })();
@@ -204,6 +255,15 @@ export default function History({
     setExportNote(`Exported ${out.count} ${out.count === 1 ? "set" : "sets"}.`);
   }
 
+  const filterable = workouts?.map((w) => ({ ...w, gymName: one(w.gym)?.name ?? null })) ?? [];
+  const gymOpts = gymOptions(filterable);
+  const typeOpts = typeOptions(filterable);
+  // A filter whose workouts were all deleted quietly stops applying.
+  const gymSel = gymOpts.some((o) => o.key === gymFilter) ? gymFilter : "";
+  const typeSel = typeOpts.some((o) => o.key === typeFilter) ? typeFilter : "";
+  const shown = applyFilters(filterable, gymSel, typeSel);
+  const filtering = gymSel !== "" || typeSel !== "";
+
   if (workouts === null) {
     return <p className="px-5 pt-6 text-sm font-medium text-muted">Loading...</p>;
   }
@@ -222,6 +282,51 @@ export default function History({
         </p>
       )}
 
+      {workouts.length > 0 && (
+        <div className="flex flex-col gap-2 px-1" aria-label="Filter workouts">
+          <div className="flex gap-2">
+            <FilterSelect
+              label="Gym"
+              allLabel="All gyms"
+              value={gymSel}
+              options={gymOpts}
+              onChange={setGymFilter}
+            />
+            <FilterSelect
+              label="Workout"
+              allLabel="All workouts"
+              value={typeSel}
+              options={typeOpts}
+              onChange={setTypeFilter}
+            />
+          </div>
+          {filtering && (
+            <p className="flex items-center justify-between text-[13px] font-medium text-muted">
+              <span>
+                Showing {shown.length} of {workouts.length} {workouts.length === 1 ? "workout" : "workouts"}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setGymFilter("");
+                  setTypeFilter("");
+                }}
+                className="font-bold text-accent"
+              >
+                Clear filters
+              </button>
+            </p>
+          )}
+        </div>
+      )}
+
+      {filtering && shown.length === 0 && (
+        <div className="rounded-[20px] bg-card p-5 text-center shadow-sm">
+          <p className="text-base font-bold">No workouts match</p>
+          <p className="mt-1 text-sm font-medium text-muted">Try a different gym or workout, or clear the filters.</p>
+        </div>
+      )}
+
       {workouts.length === 0 && !error && (
         <div className="rounded-[20px] bg-card p-5 text-center shadow-sm">
           <p className="text-base font-bold">No workouts yet</p>
@@ -229,7 +334,7 @@ export default function History({
         </div>
       )}
 
-      {workouts.map((w) => {
+      {shown.map((w) => {
         const sum = summarize(w);
         const open = openId === w.id;
         const gym = one(w.gym)?.name;

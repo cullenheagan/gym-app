@@ -6,6 +6,9 @@ import { type Unit, formatWeight, fromDisplay, toDisplay } from "@/lib/units";
 import { formatClock, formatDate } from "@/lib/format";
 import History, { type RepeatPlan } from "./History";
 import SetupPanel from "./SetupPanel";
+import Gyms from "./Gyms";
+import { EQUIPMENT, equipmentLabel } from "@/lib/equipment";
+import type { Gym } from "@/lib/types";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { explain, isOffline, looksLikeNetworkError } from "@/lib/net";
 import { type OutboxSet, type OutboxWorkout, enqueue, flushOutbox, loadOutbox } from "@/lib/outbox";
@@ -30,7 +33,6 @@ type Exercise = {
   sets: SetRow[];
 };
 
-type Gym = { id: string; name: string };
 
 // An exercise in the account's library. gym_id null means it is available at every gym.
 type Catalog = { id: string; name: string; equipment_type: string; gym_id: string | null; photo_path: string | null };
@@ -43,17 +45,6 @@ type PastSet = {
   completed_at: string | null;
   setup_id: string | null;
 };
-
-// Free weights and bodyweight work anywhere; machines and cables belong to one gym.
-const EQUIPMENT = [
-  { value: "free_weight", label: "Free weight", anyGym: true },
-  { value: "bodyweight", label: "Bodyweight", anyGym: true },
-  { value: "pin_machine", label: "Pin-loaded machine", anyGym: false },
-  { value: "plate_machine", label: "Plate-loaded machine", anyGym: false },
-  { value: "cable", label: "Cable", anyGym: false },
-] as const;
-
-const equipmentLabel = (v: string) => EQUIPMENT.find((e) => e.value === v)?.label ?? "Other";
 
 const newId = () => crypto.randomUUID();
 
@@ -168,7 +159,10 @@ export default function Workout({
   const [title, setTitle] = useState("Workout");
   const [startedAt, setStartedAt] = useState(() => new Date().toISOString());
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [gyms, setGyms] = useState<Gym[]>([]);
+  const [allGyms, setAllGyms] = useState<Gym[]>([]);
+  const [gymsLoaded, setGymsLoaded] = useState(false);
+  // Removed gyms stay in allGyms (they keep their history) but leave the dropdown.
+  const gyms = allGyms.filter((g) => !g.archived_at);
   const [gymId, setGymId] = useState("");
   const [catalog, setCatalog] = useState<Catalog[]>([]);
   const [addingGym, setAddingGym] = useState(false);
@@ -185,7 +179,7 @@ export default function Workout({
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  const [view, setView] = useState<"log" | "history">("log");
+  const [view, setView] = useState<"log" | "history" | "gyms">("log");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [pending, setPending] = useState(0);
@@ -244,8 +238,9 @@ export default function Workout({
     // Show the copy saved on this device straight away; fresh data replaces it when it arrives.
     const savedGyms = readCache<Gym[]>(cacheKey(userId, "gyms"));
     if (savedGyms) {
-      setGyms(savedGyms);
-      if (savedGyms.length > 0) setGymId((cur) => cur || savedGyms[0].id);
+      setAllGyms(savedGyms);
+      const firstActive = savedGyms.find((g) => !g.archived_at);
+      if (firstActive) setGymId((cur) => cur || firstActive.id);
     }
     const savedCatalog = readCache<Catalog[]>(cacheKey(userId, "catalog"));
     if (savedCatalog) setCatalog(savedCatalog);
@@ -256,12 +251,23 @@ export default function Workout({
       if (!cancelled && profile.data && (profile.data.unit === "lb" || profile.data.unit === "kg")) {
         setUnit(profile.data.unit as Unit);
       }
-      const res = await db.from("gyms").select("id,name").order("created_at", { ascending: true });
-      if (!cancelled && res.data) {
-        const list = res.data as Gym[];
+      const full = await db
+        .from("gyms")
+        .select("id,name,photo_path,archived_at")
+        .order("created_at", { ascending: true });
+      let gymRows = full.error ? null : (full.data as Gym[] | null);
+      // Until the latest database update is run, those two columns do not exist yet.
+      if (full.error && /photo_path|archived_at/.test(full.error.message)) {
+        const basic = await db.from("gyms").select("id,name").order("created_at", { ascending: true });
+        gymRows = basic.error ? null : (basic.data as Gym[] | null);
+      }
+      if (!cancelled && gymRows) {
+        const list = gymRows;
         writeCache(cacheKey(userId, "gyms"), list);
-        setGyms(list);
-        if (list.length > 0) setGymId((cur) => cur || list[0].id);
+        setAllGyms(list);
+        const firstActive = list.find((g) => !g.archived_at);
+        if (firstActive) setGymId((cur) => cur || firstActive.id);
+        setGymsLoaded(true);
       }
       const cat = await db
         .from("exercises")
@@ -286,6 +292,18 @@ export default function Workout({
       cancelled = true;
     };
   }, [db, userId]);
+
+  // Keep the saved copy of the gym list current when gyms are added, photographed or removed.
+  useEffect(() => {
+    if (gymsLoaded) writeCache(cacheKey(userId, "gyms"), allGyms);
+  }, [gymsLoaded, allGyms, userId]);
+
+  // If the selected gym was removed (here or from the Gyms tab), switch to another one.
+  useEffect(() => {
+    if (!gymsLoaded || !gymId) return;
+    if (!gyms.some((g) => g.id === gymId)) setGymId(gyms[0]?.id ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gymsLoaded, allGyms, gymId]);
 
   async function syncNow() {
     if (loadOutbox(userId).length === 0) {
@@ -377,7 +395,7 @@ export default function Workout({
       return;
     }
     const gym = data as Gym;
-    setGyms((g) => [...g, gym]);
+    setAllGyms((g) => [...g, gym]);
     setGymId(gym.id);
     setNewGym("");
     setAddingGym(false);
@@ -750,7 +768,7 @@ export default function Workout({
       </div>
 
       <div className="mx-4 mt-4 flex rounded-xl bg-line p-[3px]" role="group" aria-label="Screen">
-        {(["log", "history"] as const).map((v) => (
+        {(["log", "history", "gyms"] as const).map((v) => (
           <button
             key={v}
             type="button"
@@ -760,7 +778,7 @@ export default function Workout({
               view === v ? "bg-card text-ink" : "text-muted"
             }`}
           >
-            {v === "log" ? "Log" : "History"}
+            {v === "log" ? "Log" : v === "history" ? "History" : "Gyms"}
           </button>
         ))}
       </div>
@@ -784,6 +802,18 @@ export default function Workout({
       )}
 
       {view === "history" && <History db={db} userId={userId} unit={unit} onRepeat={repeatWorkout} />}
+
+      {view === "gyms" && (
+        <Gyms
+          db={db}
+          userId={userId}
+          gyms={allGyms}
+          catalog={catalog}
+          machineUrls={photoUrls}
+          currentGymId={gymId}
+          onChange={(update) => setAllGyms(update)}
+        />
+      )}
 
       <header className={view === "log" ? "px-5 pt-4" : "hidden"}>
         <label htmlFor="title" className="sr-only">
