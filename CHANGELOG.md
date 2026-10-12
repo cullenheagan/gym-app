@@ -2,6 +2,9 @@
 
 Newest first. Each entry says what changed and why. Mirrored in the Notion "Gym App" wiki.
 
+## 2026-10-12
+- Partial reps: the Reps box on a strength set accepts decimals such as 8.5 or 8.25 (up to two decimal places). They count in total weight lifted, Est. 1RM, Volume, weight suggestions, History, Progress and the CSV export, and show as typed (8.5). Intervals reps stay whole numbers. Migration 0012 changes workout_sets.reps from a whole number to numeric(5,2); existing reps keep their values.
+
 ## 2026-10-09
 - Activity calendar on Home: one month at a time, with arrows to go back through earlier months. Each day is a square with its date, brighter the longer you trained that day (four shades: under 20 min, 20 to 44, 45 to 74, 75 or more; each workout counts at most 4 hours), for any workout type. Tap a day to see its workouts, and see your current and best streak. No database change.
 - Fix: a workout you have started but not added anything to can now be cancelled with a Cancel workout button (no confirmation needed, nothing is logged yet). It takes you back to Home.

@@ -82,7 +82,7 @@ async function loadRows(db: SupabaseClient, userId: string): Promise<ProgressSet
         startedAt: w.started_at,
         gymName: one(w.gym)?.name ?? null,
         kg: r.weight_kg == null ? null : Number(r.weight_kg),
-        reps: r.reps,
+        reps: r.reps == null ? null : Number(r.reps),
         setType: r.set_type,
         kind: ex.kind ?? null,
         durationS: r.duration_s,

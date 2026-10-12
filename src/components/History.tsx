@@ -112,7 +112,7 @@ export function summarize(w: RawWorkout) {
   });
 
   const working = w.workout_sets.filter((s) => s.set_type !== "warmup");
-  const volumeKg = working.reduce((sum, s) => sum + Number(s.weight_kg ?? 0) * (s.reps ?? 0), 0);
+  const volumeKg = working.reduce((sum, s) => sum + Number(s.weight_kg ?? 0) * Number(s.reps ?? 0), 0);
   const total = w.ended_at ? Math.max(0, ms(w.ended_at) - ms(w.started_at)) : null;
   const activeSeconds = working.reduce((sum, s) => sum + Number(s.duration_s ?? 0), 0);
   const meters = working.reduce((sum, s) => sum + Number(s.distance_m ?? 0), 0);
@@ -133,7 +133,7 @@ export function toPlan(w: RawWorkout, sum: ReturnType<typeof summarize>): Repeat
         setupId: ex.setupId,
         sets: ex.sets.map((s) => ({
           kg: s.weight_kg == null ? null : Number(s.weight_kg),
-          reps: s.reps,
+          reps: s.reps == null ? null : Number(s.reps),
           warmup: s.set_type === "warmup" || undefined,
           durationS: s.duration_s ?? null,
           distanceM: s.distance_m == null ? null : Number(s.distance_m),
@@ -437,7 +437,7 @@ export default function History({
                                 sum.kind,
                                 {
                                   kg: s.weight_kg == null ? null : Number(s.weight_kg),
-                                  reps: s.reps,
+                                  reps: s.reps == null ? null : Number(s.reps),
                                   durationS: s.duration_s ?? null,
                                   distanceM: s.distance_m == null ? null : Number(s.distance_m),
                                   rpe: s.rpe == null ? null : Number(s.rpe),

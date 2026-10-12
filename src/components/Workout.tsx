@@ -186,6 +186,7 @@ async function loadPrevious(db: SupabaseClient, userId: string, exerciseId: stri
     result = {
       sets: rows
         .filter((r: PastSet) => r.workout_id === last && r.set_type !== "warmup")
+        .map((r: PastSet) => ({ ...r, reps: r.reps == null ? null : Number(r.reps) }))
         .sort((a: PastSet, b: PastSet) => a.set_index - b.set_index),
       date: rows[0].completed_at,
       setupId: rows[0].setup_id,
@@ -773,7 +774,7 @@ export default function Workout({
     const sg =
       kind === "strength"
         ? suggest(
-            past.map((p) => ({ kg: p.weight_kg == null ? null : Number(p.weight_kg), reps: p.reps })),
+            past.map((p) => ({ kg: p.weight_kg == null ? null : Number(p.weight_kg), reps: p.reps == null ? null : Number(p.reps) })),
             stepKg(unit),
           )
         : null;
@@ -1632,10 +1633,10 @@ export default function Workout({
                           onChange={(v) => updateSet(ex.key, s.id, { kg: v == null ? null : fromDisplay(v, unit) })}
                         />
                         <NumField
-                          integer
-                          ariaLabel={`Reps, set ${i + 1}`}
+                          ariaLabel={`Reps, set ${i + 1} (decimals like 8.5 allowed)`}
+                          max={999}
                           value={s.reps ?? null}
-                          onChange={(v) => updateSet(ex.key, s.id, { reps: v })}
+                          onChange={(v) => updateSet(ex.key, s.id, { reps: v == null ? null : Math.round(v * 100) / 100 })}
                         />
                       </>
                     ) : kindOf(ex.kind) === "intervals" ? (
