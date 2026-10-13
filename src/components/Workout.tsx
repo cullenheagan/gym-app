@@ -658,6 +658,16 @@ export default function Workout({
     setPhotoPreview(null);
   }
 
+  // Open the exercise picker and bring it into view. It sits at the top of the log, so when you tap
+  // Add exercise from further down (or it is already open) the screen has to scroll back up to it.
+  function openPicker() {
+    setPicking(true);
+    window.setTimeout(() => {
+      document.getElementById("exercise-picker")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById("exercise-search")?.focus({ preventScroll: true });
+    }, 60);
+  }
+
   function closePicker() {
     setPicking(false);
     setSupersetFor(null);
@@ -786,7 +796,7 @@ export default function Workout({
 
   // The camera button: open the picker for a new machine and go straight to the camera.
   function startMachinePhoto() {
-    setPicking(true);
+    openPicker();
     setNewType("pin_machine");
     photoInput.current?.click();
   }
@@ -846,7 +856,7 @@ export default function Workout({
   // The Superset? button: choose the second exercise from the picker.
   function startSuperset(exKey: string) {
     setSupersetFor(exKey);
-    setPicking(true);
+    openPicker();
     setMessage(null);
   }
 
@@ -1650,7 +1660,7 @@ export default function Workout({
 
       <div className={logOpen ? "mt-4 flex flex-col gap-3 px-4" : "hidden"}>
         {picking && (
-          <section className="rounded-[20px] bg-card p-4 shadow-sm" aria-label="Add exercise">
+          <section id="exercise-picker" className="scroll-mt-4 rounded-[20px] bg-card p-4 shadow-sm" aria-label="Add exercise">
             <label htmlFor="exercise-search" className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-muted">
               {supersetFor ? `Superset with ${exercises.find((e) => e.key === supersetFor)?.name ?? "this exercise"} · pick the second exercise` : `Add exercise${gymName ? ` · ${gymName}` : ""}`}
             </label>
@@ -1932,7 +1942,7 @@ export default function Workout({
         }`}
         aria-label="Workout actions"
       >
-        <button type="button" onClick={() => setPicking(true)} className="h-12 flex-1 text-base font-bold text-bg">
+        <button type="button" onClick={openPicker} className="h-12 flex-1 text-base font-bold text-bg">
           + Add exercise
         </button>
         <button
