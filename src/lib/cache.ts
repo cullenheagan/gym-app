@@ -17,3 +17,18 @@ export function writeCache(key: string, value: unknown): void {
 }
 
 export const cacheKey = (userId: string, name: string) => `cache:${userId}:${name}`;
+
+// On sign-out, remove the copies of this person's data kept on the phone (history, exercises,
+// last-time sets, name and photo). Workouts still waiting to sync and an unfinished workout are
+// kept, so nothing logged is lost; they belong to this account and only show after signing back in.
+export function clearPersonalData(userId: string): void {
+  try {
+    const prefixes = [`cache:${userId}:`, `name:${userId}`, `avatar:${userId}`];
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && prefixes.some((p) => k.startsWith(p))) doomed.push(k);
+    }
+    for (const k of doomed) localStorage.removeItem(k);
+  } catch {}
+}

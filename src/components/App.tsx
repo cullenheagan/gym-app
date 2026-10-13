@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import AuthForm from "./AuthForm";
+import { clearPersonalData } from "@/lib/cache";
 import Workout from "./Workout";
 
 type KnownUser = { id: string; email: string };
@@ -99,6 +100,7 @@ export default function App() {
       userId={user.id}
       email={user.email}
       onSignOut={() => {
+        clearPersonalData(user.id);
         forgetUser();
         setFallback(null);
         db.auth.signOut();
