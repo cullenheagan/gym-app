@@ -11,6 +11,8 @@
   --accent: #2457f5;
   --accent-tint: #e8eeff;
   --done: #16a34a;
+  --kind-intervals: #7c5ce0;
+  --kind-sport: #b7791f;
   --on-accent: #ffffff;
 }
 
@@ -24,6 +26,8 @@
   --accent: #5b83ff;
   --accent-tint: #1b2745;
   --done: #34c77b;
+  --kind-intervals: #a58bff;
+  --kind-sport: #e0a23a;
   --on-accent: #0e1014;
 }
 
@@ -38,6 +42,8 @@
     --accent: #5b83ff;
     --accent-tint: #1b2745;
     --done: #34c77b;
+    --kind-intervals: #a58bff;
+    --kind-sport: #e0a23a;
     --on-accent: #0e1014;
   }
 }

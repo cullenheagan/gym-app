@@ -7,8 +7,15 @@ import { KINDS, type Kind, kindLabel } from "@/lib/kinds";
 import ActivityCalendar from "./ActivityCalendar";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { formatClock, formatDuration } from "@/lib/format";
-import { type HomeWorkout, templates, weekTotals } from "@/lib/home-stats";
+import { type HomeWorkout, hasEarlier, kindBreakdown, templates, weekStartBack, weekTotals, weekWorkouts } from "@/lib/home-stats";
 import { type RawWorkout, type RepeatPlan, summarize, toPlan } from "./History";
+
+const KIND_COLOR: Record<Kind, string> = {
+  strength: "var(--accent)",
+  cardio: "var(--done)",
+  intervals: "var(--kind-intervals)",
+  sport: "var(--kind-sport)",
+};
 
 const SELECT =
   "id,name,kind,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,set_type,duration_s,distance_m,rpe,weight_kg,reps,reps_right,completed_at,setup_id,superset_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))";
@@ -69,7 +76,22 @@ export default function Home({
   }, [db, ck]);
 
   const tpls = useMemo(() => templates(list ?? []), [list]);
-  const week = useMemo(() => weekTotals(list ?? [], Date.now()), [list]);
+  // Tap the This week card to open a breakdown; arrows move back through earlier weeks.
+  const [weekOpen, setWeekOpen] = useState(false);
+  const [back, setBack] = useState(0);
+  const week = useMemo(() => weekTotals(list ?? [], Date.now(), back), [list, back]);
+  const weekStartMs = weekStartBack(Date.now(), back);
+  const weekList = useMemo(() => weekWorkouts(list ?? [], weekStartMs), [list, weekStartMs]);
+  const byKind = useMemo(() => kindBreakdown(weekList), [weekList]);
+  const kindMs = byKind.reduce((sum, k) => sum + k.ms, 0);
+  const earlier = hasEarlier(list ?? [], weekStartMs);
+  const shortDay = (ms: number) => new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const weekEndMs = (() => {
+    const d = new Date(weekStartMs);
+    d.setDate(d.getDate() + 6);
+    return d.getTime();
+  })();
+  const weekLabel = back === 0 ? "This week" : `${shortDay(weekStartMs)} to ${shortDay(weekEndMs)}`;
 
   return (
     <div className="px-4 pb-8 pt-4">
@@ -138,25 +160,114 @@ export default function Home({
 
       {!startOnly && (
       <section className="mt-6">
-        <h3 className="px-1 text-sm font-extrabold">This week</h3>
-        <div
-          className={`mt-2 grid gap-2 rounded-[20px] bg-card p-4 shadow-sm ${week.volumeKg > 0 ? "grid-cols-3" : "grid-cols-2"}`}
-        >
-          <div>
-            <div className="text-xs text-muted">Workouts</div>
-            <div className="text-2xl font-extrabold">{list == null ? "-" : week.count}</div>
-          </div>
-          <div>
-            <div className="text-xs text-muted">Active time</div>
-            <div className="text-2xl font-extrabold">{list == null ? "-" : formatDuration(week.activeMs)}</div>
-          </div>
-          {week.volumeKg > 0 && (
-            <div>
-              <div className="text-xs text-muted">Total lifted</div>
-              <div className="text-2xl font-extrabold">
-                {Math.round(toDisplay(week.volumeKg, unit)).toLocaleString("en-US")}
-                <span className="ml-1 text-sm font-bold text-muted">{unit}</span>
+        <h3 className="px-1 text-sm font-extrabold">{back === 0 ? "This week" : `Week of ${shortDay(weekStartMs)}`}</h3>
+        <div className="mt-2 rounded-[20px] bg-card shadow-sm">
+          <button
+            type="button"
+            onClick={() => {
+              setWeekOpen((o) => !o);
+              setBack(0);
+            }}
+            aria-expanded={weekOpen}
+            className="block w-full p-4 text-left"
+          >
+            <div className={`grid gap-2 ${week.volumeKg > 0 ? "grid-cols-3" : "grid-cols-2"}`}>
+              <div>
+                <div className="text-xs text-muted">Workouts</div>
+                <div className="text-2xl font-extrabold">{list == null ? "-" : week.count}</div>
               </div>
+              <div>
+                <div className="text-xs text-muted">Active time</div>
+                <div className="text-2xl font-extrabold">{list == null ? "-" : formatDuration(week.activeMs)}</div>
+              </div>
+              {week.volumeKg > 0 && (
+                <div>
+                  <div className="text-xs text-muted">Total lifted</div>
+                  <div className="text-2xl font-extrabold">
+                    {Math.round(toDisplay(week.volumeKg, unit)).toLocaleString("en-US")}
+                    <span className="ml-1 text-sm font-bold text-muted">{unit}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <span className="mt-2 block text-xs font-bold text-accent">{weekOpen ? "Hide breakdown \u25B4" : "See breakdown \u25BE"}</span>
+          </button>
+
+          {weekOpen && (
+            <div className="mx-4 border-t border-line pb-4 pt-3">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBack((b) => b + 1)}
+                  disabled={!earlier}
+                  aria-label="Earlier week"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-field text-base font-bold disabled:opacity-30"
+                >
+                  {"\u2039"}
+                </button>
+                <span className="text-sm font-extrabold">{weekLabel}</span>
+                <button
+                  type="button"
+                  onClick={() => setBack((b) => Math.max(0, b - 1))}
+                  disabled={back === 0}
+                  aria-label="Later week"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-field text-base font-bold disabled:opacity-30"
+                >
+                  {"\u203A"}
+                </button>
+              </div>
+
+              {weekList.length === 0 ? (
+                <p className="mt-3 text-sm font-medium text-muted">No workouts this week.</p>
+              ) : (
+                <>
+                  <p className="mt-4 text-xs font-bold text-muted">By type</p>
+                  {kindMs > 0 && (
+                    <div className="mt-2 flex h-2.5 gap-0.5 overflow-hidden rounded-full" aria-hidden="true">
+                      {byKind
+                        .filter((k) => k.ms > 0)
+                        .map((k) => (
+                          <span key={k.kind} style={{ flex: k.ms, background: KIND_COLOR[k.kind] }} />
+                        ))}
+                    </div>
+                  )}
+                  <ul className="mt-2 flex flex-col">
+                    {byKind.map((k) => (
+                      <li key={k.kind} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+                        <span className="min-w-0">
+                          <span className="mr-2 inline-block h-2 w-2 rounded-full" style={{ background: KIND_COLOR[k.kind] }} />
+                          <span className="font-bold">{kindLabel(k.kind)}</span>
+                          <span className="text-muted">
+                            {" "}
+                            · {k.count} {k.count === 1 ? "workout" : "workouts"}
+                            {k.volumeKg > 0 ? ` · ${Math.round(toDisplay(k.volumeKg, unit)).toLocaleString("en-US")} ${unit}` : ""}
+                          </span>
+                        </span>
+                        <span className="shrink-0 font-bold">{formatDuration(k.ms)}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <p className="mt-3 text-xs font-bold text-muted">Workouts</p>
+                  <ul className="mt-1 flex flex-col">
+                    {weekList.map((w, i) => {
+                      const kind = w.kind ?? "strength";
+                      return (
+                        <li key={`${w.startedAt}-${i}`} className="flex items-center justify-between gap-3 border-t border-line py-2">
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-bold">{w.name}</span>
+                            <span className="block text-xs font-medium text-muted">
+                              {new Date(w.startedAt).toLocaleDateString("en-US", { weekday: "short" })} · {kindLabel(kind)}
+                              {w.volumeKg > 0 ? ` · ${Math.round(toDisplay(w.volumeKg, unit)).toLocaleString("en-US")} ${unit}` : ""}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-sm font-bold">{w.activeMs ? formatDuration(w.activeMs) : "-"}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
             </div>
           )}
         </div>

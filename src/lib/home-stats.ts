@@ -15,9 +15,46 @@ export function weekStart(now: number): number {
   return d.getTime();
 }
 
-export function weekTotals<P>(ws: HomeWorkout<P>[], now: number) {
-  const start = weekStart(now);
-  const mine = ws.filter((w) => Date.parse(w.startedAt) >= start);
+// Monday 00:00 of the week `back` weeks before the week containing `now`.
+export function weekStartBack(now: number, back: number): number {
+  const d = new Date(weekStart(now));
+  d.setDate(d.getDate() - 7 * back);
+  return d.getTime();
+}
+
+// The workouts that started in the week beginning at `start` (a Monday), oldest first.
+export function weekWorkouts<P>(ws: HomeWorkout<P>[], start: number): HomeWorkout<P>[] {
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  return ws
+    .filter((w) => {
+      const t = Date.parse(w.startedAt);
+      return t >= start && t < end.getTime();
+    })
+    .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+}
+
+// Time, count and weight lifted per workout type for one week, longest first.
+export function kindBreakdown<P>(mine: HomeWorkout<P>[]): { kind: Kind; count: number; ms: number; volumeKg: number }[] {
+  const map = new Map<Kind, { kind: Kind; count: number; ms: number; volumeKg: number }>();
+  for (const w of mine) {
+    const kind: Kind = w.kind ?? "strength";
+    const cur = map.get(kind) ?? { kind, count: 0, ms: 0, volumeKg: 0 };
+    cur.count += 1;
+    cur.ms += w.activeMs ?? 0;
+    cur.volumeKg += w.volumeKg;
+    map.set(kind, cur);
+  }
+  return [...map.values()].sort((a, b) => b.ms - a.ms || b.count - a.count);
+}
+
+// True when something was logged before the week beginning at `start`.
+export function hasEarlier<P>(ws: HomeWorkout<P>[], start: number): boolean {
+  return ws.some((w) => Date.parse(w.startedAt) < start);
+}
+
+export function weekTotals<P>(ws: HomeWorkout<P>[], now: number, back = 0) {
+  const mine = weekWorkouts(ws, weekStartBack(now, back));
   return {
     count: mine.length,
     volumeKg: mine.reduce((sum, w) => sum + w.volumeKg, 0),
