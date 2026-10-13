@@ -7,6 +7,7 @@ import { EQUIPMENT, equipmentLabel } from "@/lib/equipment";
 import { PHOTO_BUCKET, compressPhoto, uploadPhoto } from "@/lib/photo";
 import { explain } from "@/lib/net";
 import PhotoViewer from "./PhotoViewer";
+import { loadOutbox } from "@/lib/outbox";
 
 type Machine = {
   id: string;
@@ -57,6 +58,8 @@ export default function Gyms({
   onReplacePhoto,
   onDeletePhoto,
   currentGymId,
+  activeGymId,
+  activeExerciseIds,
   onChange,
 }: {
   db: SupabaseClient;
@@ -68,6 +71,8 @@ export default function Gyms({
   onReplacePhoto: (machineId: string, file: File) => Promise<string | null>;
   onDeletePhoto: (machineId: string) => Promise<string | null>;
   currentGymId: string;
+  activeGymId: string | null; // gym of the workout in progress, if any
+  activeExerciseIds: string[]; // machines in the workout in progress
   onChange: (update: (all: Gym[]) => Gym[]) => void;
 }) {
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -91,6 +96,13 @@ export default function Gyms({
 
   // A gym or machine can only be deleted for good if nothing was ever logged with it.
   async function checkDeletable(kind: "gym" | "machine", id: string): Promise<boolean> {
+    // Workouts in progress or still waiting on this phone to sync count too: deleting what they
+    // use would make them impossible to save.
+    const waiting = loadOutbox(userId);
+    const usedIds = new Set([...activeExerciseIds, ...waiting.flatMap((i) => i.sets.map((s) => s.exercise_id))]);
+    const machineIds = kind === "machine" ? [id] : catalog.filter((c) => c.gym_id === id).map((c) => c.id);
+    if (machineIds.some((m) => usedIds.has(m))) return false;
+    if (kind === "gym" && (activeGymId === id || waiting.some((i) => i.workout.gym_id === id))) return false;
     if (kind === "machine") {
       const r = await db.from("workout_sets").select("id", { count: "exact", head: true }).eq("exercise_id", id);
       return !r.error && r.count === 0;

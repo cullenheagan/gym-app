@@ -1653,6 +1653,8 @@ export default function Workout({
           onReplacePhoto={replaceExercisePhoto}
           onDeletePhoto={deleteExercisePhoto}
           currentGymId={gymId}
+          activeGymId={exercises.length > 0 ? gymId : null}
+          activeExerciseIds={exercises.map((e) => e.exerciseId).filter((x): x is string => !!x)}
           onChange={(update) => setAllGyms(update)}
         />
       )}

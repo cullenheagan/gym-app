@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { looksLikeNetworkError } from "./net";
 
 // Finished workouts wait here until they are safely in the database. Every row has an id made
 // on the phone, so sending the same workout twice never creates a duplicate.
@@ -69,7 +70,9 @@ export function enqueue(userId: string, workout: OutboxWorkout, sets: OutboxSet[
 
 let running: Promise<{ sent: number; left: number }> | null = null;
 
-// Sends queued workouts oldest first. Stops at the first failure and keeps the rest for later.
+// Sends queued workouts oldest first. A lost connection stops the run and keeps the rest for later.
+// Any other failure is noted on that workout and the next one is still sent, so one workout
+// that the database refuses can never hold back the others.
 export function flushOutbox(db: SupabaseClient, userId: string): Promise<{ sent: number; left: number }> {
   if (running) return running;
   running = (async () => {
@@ -91,7 +94,8 @@ export function flushOutbox(db: SupabaseClient, userId: string): Promise<{ sent:
       if (error) {
         items = loadOutbox(userId).map((i) => (i.workout.id === item.workout.id ? { ...i, lastError: error } : i));
         saveOutbox(userId, items);
-        return { sent, left: items.length };
+        if (looksLikeNetworkError(error)) return { sent, left: items.length };
+        continue;
       }
       items = loadOutbox(userId).filter((i) => i.workout.id !== item.workout.id);
       saveOutbox(userId, items);
