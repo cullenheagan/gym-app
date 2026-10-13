@@ -22,6 +22,7 @@ export type OutboxSet = {
   set_type: string;
   weight_kg: number | null;
   reps: number | null;
+  reps_right?: number | null; // single-arm sets: right side (reps is the left side)
   completed_at: string;
   setup_id: string | null;
   duration_s?: number | null;

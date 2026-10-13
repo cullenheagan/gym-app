@@ -9,6 +9,7 @@ import { clockOf, resolveEnd, showClock } from "@/lib/endtime";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { downloadCsv, exportAllSets } from "@/lib/csv";
 import { explain } from "@/lib/net";
+import { totalReps } from "@/lib/sides";
 import { applyFilters, gymOptions, typeOptions } from "@/lib/history-filter";
 
 type Named = { name: string };
@@ -29,6 +30,7 @@ export type RepeatPlan = {
     sets: {
       kg: number | null;
       reps: number | null;
+      repsR?: number | null;
       warmup?: boolean;
       durationS?: number | null;
       distanceM?: number | null;
@@ -45,6 +47,7 @@ type RawSet = {
   rpe?: number | null;
   weight_kg: number | null;
   reps: number | null;
+  reps_right?: number | null;
   completed_at: string | null;
   setup_id: string | null;
   superset_id?: string | null;
@@ -116,7 +119,7 @@ export function summarize(w: RawWorkout) {
   });
 
   const working = w.workout_sets.filter((s) => s.set_type !== "warmup");
-  const volumeKg = working.reduce((sum, s) => sum + Number(s.weight_kg ?? 0) * Number(s.reps ?? 0), 0);
+  const volumeKg = working.reduce((sum, s) => sum + Number(s.weight_kg ?? 0) * totalReps(s.reps, s.reps_right), 0);
   const total = w.ended_at ? Math.max(0, ms(w.ended_at) - ms(w.started_at)) : null;
   const activeSeconds = working.reduce((sum, s) => sum + Number(s.duration_s ?? 0), 0);
   const meters = working.reduce((sum, s) => sum + Number(s.distance_m ?? 0), 0);
@@ -139,6 +142,7 @@ export function toPlan(w: RawWorkout, sum: ReturnType<typeof summarize>): Repeat
         sets: ex.sets.map((s) => ({
           kg: s.weight_kg == null ? null : Number(s.weight_kg),
           reps: s.reps == null ? null : Number(s.reps),
+          repsR: s.reps_right == null ? null : Number(s.reps_right),
           warmup: s.set_type === "warmup" || undefined,
           durationS: s.duration_s ?? null,
           distanceM: s.distance_m == null ? null : Number(s.distance_m),
@@ -228,7 +232,7 @@ export default function History({
       const res = await db
         .from("workouts")
         .select(
-          "id,name,kind,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,set_type,duration_s,distance_m,rpe,weight_kg,reps,completed_at,setup_id,superset_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))",
+          "id,name,kind,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,set_type,duration_s,distance_m,rpe,weight_kg,reps,reps_right,completed_at,setup_id,superset_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))",
         )
         .order("started_at", { ascending: false })
         .limit(200);
@@ -541,6 +545,7 @@ export default function History({
                                 {
                                   kg: s.weight_kg == null ? null : Number(s.weight_kg),
                                   reps: s.reps == null ? null : Number(s.reps),
+                                  repsR: s.reps_right == null ? null : Number(s.reps_right),
                                   durationS: s.duration_s ?? null,
                                   distanceM: s.distance_m == null ? null : Number(s.distance_m),
                                   rpe: s.rpe == null ? null : Number(s.rpe),

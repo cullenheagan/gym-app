@@ -6,6 +6,7 @@ import { type Unit, formatWeight, fromDisplay, toDisplay } from "@/lib/units";
 import { formatClock, formatDate } from "@/lib/format";
 import { clockOf, resolveEnd, showClock } from "@/lib/endtime";
 import { suggest } from "@/lib/suggest";
+import { repsText, totalReps } from "@/lib/sides";
 import {
   type Kind,
   QUICK_ADD,
@@ -45,8 +46,10 @@ type SetRow = {
   id: string; // generated on the device so a retried save never duplicates a set
   prevKg: number | null;
   prevReps: number | null;
+  prevRepsR?: number | null; // single-arm: last time's right side
   kg: number | null;
-  reps: number | null;
+  reps: number | null; // for a single-arm exercise this is the left side
+  repsR?: number | null; // single-arm: right side
   done: boolean;
   doneAt: string | null; // when the set was marked done
   warmup?: boolean; // warm-up sets are saved but left out of totals, progress and suggestions
@@ -67,6 +70,7 @@ type Exercise = {
   setupId?: string | null; // bench / seat setup used (optional; older drafts lack it)
   kind?: Kind; // missing on older drafts, which were all strength
   supersetId?: string | null; // two exercises sharing this id are a superset (a pair)
+  singleArm?: boolean; // done one side at a time: each set has a left and a right reps box
   suggestion?: { kg: number; reps: number; hit: boolean; lastKg: number } | null;
   sets: SetRow[];
 };
@@ -81,6 +85,7 @@ type Catalog = {
   photo_path: string | null;
   archived_at?: string | null; // removed from your lists; history is kept
   kind?: string | null; // strength, cardio, intervals or sport
+  single_arm?: boolean;
 };
 
 type PastSet = {
@@ -88,6 +93,7 @@ type PastSet = {
   set_index: number;
   weight_kg: number | null;
   reps: number | null;
+  reps_right?: number | null;
   completed_at: string | null;
   setup_id: string | null;
   set_type?: string | null;
@@ -104,6 +110,7 @@ function blankLike(last: SetRow | undefined, strength: boolean): SetRow {
     id: newId(),
     prevKg: last?.kg ?? null,
     prevReps: last?.reps ?? null,
+    prevRepsR: last?.repsR ?? null,
     kg: strength ? (last?.kg ?? null) : null,
     reps: null,
     prevDurationS: strength ? null : (last?.durationS ?? last?.prevDurationS ?? null),
@@ -182,6 +189,7 @@ function pendingPrevious(userId: string, exerciseId: string): Previous | null {
       set_index: st.set_index,
       weight_kg: st.weight_kg,
       reps: st.reps,
+      reps_right: st.reps_right ?? null,
       completed_at: st.completed_at,
       setup_id: st.setup_id,
       set_type: st.set_type,
@@ -200,7 +208,7 @@ async function loadPrevious(db: SupabaseClient, userId: string, exerciseId: stri
   let result: Previous = { sets: [], date: null, setupId: null };
   const { data, error } = await db
     .from("workout_sets")
-    .select("workout_id,set_index,weight_kg,reps,completed_at,setup_id,set_type,duration_s,distance_m,rpe")
+    .select("workout_id,set_index,weight_kg,reps,reps_right,completed_at,setup_id,set_type,duration_s,distance_m,rpe")
     .eq("exercise_id", exerciseId)
     .not("completed_at", "is", null)
     .order("completed_at", { ascending: false })
@@ -213,7 +221,7 @@ async function loadPrevious(db: SupabaseClient, userId: string, exerciseId: stri
     result = {
       sets: rows
         .filter((r: PastSet) => r.workout_id === last && r.set_type !== "warmup")
-        .map((r: PastSet) => ({ ...r, reps: r.reps == null ? null : Number(r.reps) }))
+        .map((r: PastSet) => ({ ...r, reps: r.reps == null ? null : Number(r.reps), reps_right: r.reps_right == null ? null : Number(r.reps_right) }))
         .sort((a: PastSet, b: PastSet) => a.set_index - b.set_index),
       date: rows[0].completed_at,
       setupId: rows[0].setup_id,
@@ -453,7 +461,7 @@ export default function Workout({
       }
       const catFull = await db
         .from("exercises")
-        .select("id,name,equipment_type,gym_id,photo_path,archived_at,kind")
+        .select("id,name,equipment_type,gym_id,photo_path,archived_at,kind,single_arm")
         .order("name", { ascending: true });
       let catRows = catFull.error ? null : (catFull.data as Catalog[] | null);
       // Until migration 0009 is run the column does not exist; fall back so nothing breaks.
@@ -752,6 +760,7 @@ export default function Workout({
       prevDate: plan.startedAt,
       setupId: p.setupId,
       kind: kindOf(plan.kind),
+      singleArm: kindOf(plan.kind) === "strength" && (p.sets.some((s) => s.repsR != null) || !!catalog.find((c) => c.id === p.exerciseId)?.single_arm),
       supersetId:
         p.supersetId && pairCount.get(p.supersetId) === 2
           ? (newPairId.get(p.supersetId) ?? (newPairId.set(p.supersetId, newId()), newPairId.get(p.supersetId)!))
@@ -767,8 +776,10 @@ export default function Workout({
         id: newId(),
         prevKg: s.kg,
         prevReps: s.reps,
+        prevRepsR: s.repsR ?? null,
         kg: s.kg,
         reps: s.reps,
+        repsR: s.repsR ?? null,
         done: false,
         doneAt: null,
         warmup: s.warmup || undefined,
@@ -844,6 +855,7 @@ export default function Workout({
             id: newId(),
             prevKg: p.weight_kg == null ? null : Number(p.weight_kg),
             prevReps: p.reps,
+            prevRepsR: p.reps_right == null ? null : Number(p.reps_right),
             kg: kind === "strength" && p.weight_kg != null ? Number(p.weight_kg) : null,
             reps: null,
             prevDurationS: p.duration_s ?? null,
@@ -857,11 +869,15 @@ export default function Workout({
     const sg =
       kind === "strength"
         ? suggest(
-            past.map((p) => ({ kg: p.weight_kg == null ? null : Number(p.weight_kg), reps: p.reps == null ? null : Number(p.reps) })),
+            past.map((p) => ({
+              kg: p.weight_kg == null ? null : Number(p.weight_kg),
+              reps: p.reps == null ? null : Number(p.reps),
+              repsR: p.reps_right == null ? null : Number(p.reps_right),
+            })),
             stepKg(unit),
           )
         : null;
-    const added: Exercise = { key: newId(), name: c.name, exerciseId: c.id, prevDate, setupId, kind, suggestion: sg, sets };
+    const added: Exercise = { key: newId(), name: c.name, exerciseId: c.id, prevDate, setupId, kind, suggestion: sg, sets, singleArm: kind === "strength" && (!!c.single_arm || past.some((p) => p.reps_right != null)) };
     const partnerKey = supersetFor;
     setExercises((all) => {
       const at = partnerKey ? all.findIndex((e) => e.key === partnerKey) : -1;
@@ -874,6 +890,26 @@ export default function Workout({
       return [...all.slice(0, at), first, second, ...all.slice(at + 1)];
     });
     setSupersetFor(null);
+  }
+
+  // Single-arm: each set gets a left and a right reps box. Remembered for next time.
+  async function toggleSingleArm(exKey: string) {
+    const ex = exercises.find((e) => e.key === exKey);
+    if (!ex) return;
+    const on = !ex.singleArm;
+    setExercises((all) =>
+      all.map((e) =>
+        e.key !== exKey
+          ? e
+          : { ...e, singleArm: on, sets: on ? e.sets : e.sets.map((s) => ({ ...s, repsR: null })) },
+      ),
+    );
+    if (!ex.exerciseId) return;
+    setCatalog((all) => all.map((c) => (c.id === ex.exerciseId ? { ...c, single_arm: on } : c)));
+    const res = await db.from("exercises").update({ single_arm: on }).eq("id", ex.exerciseId);
+    if (res.error && !looksLikeNetworkError(res.error.message)) {
+      setMessage({ kind: "error", text: explain(res.error.message, "Could not remember single-arm for this exercise.") });
+    }
   }
 
   // The Superset? button: choose the second exercise from the picker.
@@ -940,7 +976,7 @@ export default function Workout({
         gym_id: chosenType.anyGym ? null : gymId,
         kind: workoutKind,
       })
-      .select("id,name,equipment_type,gym_id,photo_path,archived_at,kind")
+      .select("id,name,equipment_type,gym_id,photo_path,archived_at,kind,single_arm")
       .single();
     if (error || !data) {
       setMessage({ kind: "error", text: explain(error?.message, "Could not create the exercise.") });
@@ -990,7 +1026,7 @@ export default function Workout({
       all.map((ex) => {
         if (ex.key !== exKey || !ex.suggestion) return ex;
         const { kg, reps } = ex.suggestion;
-        return { ...ex, sets: ex.sets.map((s) => (s.done || s.warmup ? s : { ...s, kg, reps })) };
+        return { ...ex, sets: ex.sets.map((s) => (s.done || s.warmup ? s : { ...s, kg, reps, ...(ex.singleArm ? { repsR: reps } : {}) })) };
       }),
     );
   }
@@ -1132,6 +1168,7 @@ export default function Workout({
           set_type: s.warmup ? "warmup" : "working",
           weight_kg: s.kg,
           reps: s.reps,
+          reps_right: ex.singleArm ? (s.repsR ?? null) : null,
           duration_s: s.durationS ?? null,
           distance_m: s.distanceM ?? null,
           rpe: s.rpe ?? null,
@@ -1179,7 +1216,7 @@ export default function Workout({
 
   // What the summary card shows depends on the workout type.
   const doneSets = exercises.flatMap((e) => e.sets).filter((s) => s.done && !s.warmup);
-  const volumeKg = doneSets.reduce((sum, s) => sum + (s.kg ?? 0) * (s.reps ?? 0), 0);
+  const volumeKg = doneSets.reduce((sum, s) => sum + (s.kg ?? 0) * totalReps(s.reps, s.repsR), 0);
   const totalSeconds = doneSets.reduce((sum, s) => sum + (s.durationS ?? 0), 0);
   const totalMeters = doneSets.reduce((sum, s) => sum + (s.distanceM ?? 0), 0);
   const effortSets = doneSets.filter((s) => s.rpe != null);
@@ -1246,14 +1283,30 @@ export default function Workout({
         />
       )}
 
-      {!tag && kindOf(ex.kind) === "strength" && (
-        <button
-          type="button"
-          onClick={() => startSuperset(ex.key)}
-          className="mt-3 h-9 rounded-[10px] border-2 border-dashed border-accent px-3 text-xs font-extrabold text-accent"
-        >
-          Superset?
-        </button>
+      {kindOf(ex.kind) === "strength" && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {!tag && (
+            <button
+              type="button"
+              onClick={() => startSuperset(ex.key)}
+              className="h-9 rounded-[10px] border-2 border-dashed border-accent px-3 text-xs font-extrabold text-accent"
+            >
+              Superset?
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => toggleSingleArm(ex.key)}
+            aria-pressed={!!ex.singleArm}
+            className={
+              ex.singleArm
+                ? "h-9 rounded-[10px] bg-accent px-3 text-xs font-extrabold text-on-accent"
+                : "h-9 rounded-[10px] border-2 border-dashed border-line px-3 text-xs font-extrabold text-muted"
+            }
+          >
+            {ex.singleArm ? "Single-arm" : "Single-arm?"}
+          </button>
+        </div>
       )}
 
       {ex.suggestion && ex.sets.some((x) => !x.done && !x.warmup) && (
@@ -1277,9 +1330,10 @@ export default function Workout({
 
   const setRow = (ex: Exercise, s: SetRow, i: number, suffix: string) => {
     const num = ex.sets.slice(0, i + 1).filter((x) => !x.warmup).length;
+    const sa = kindOf(ex.kind) === "strength" && !!ex.singleArm;
     return (
+    <div key={s.id}>
     <div
-      key={s.id}
       className={`mt-1.5 grid ${suffix ? "grid-cols-[36px_1fr_1fr_1fr_44px_36px]" : "grid-cols-[28px_1fr_1fr_1fr_44px_36px]"} items-center gap-2 ${
         s.warmup ? "rounded-xl bg-tint" : ""
       }`}
@@ -1302,7 +1356,7 @@ export default function Workout({
         {s.warmup ? "W" : `${num}${suffix}`}
       </button>
       )}
-      <span className="text-sm font-medium text-muted">
+      {!sa && <span className="text-sm font-medium text-muted">
         {kindOf(ex.kind) !== "strength"
           ? describeSet(
               kindOf(ex.kind),
@@ -1319,8 +1373,30 @@ export default function Workout({
           : !s.warmup && s.prevKg != null && s.prevReps != null
             ? `${formatWeight(s.prevKg, unit)} × ${s.prevReps}`
             : "-"}
-      </span>
-      {kindOf(ex.kind) === "strength" ? (
+      </span>}
+      {sa ? (
+        <>
+          <NumField
+            ariaLabel={`Weight in ${unit}, set ${i + 1}`}
+            value={s.kg == null ? null : toDisplay(s.kg, unit)}
+            onChange={(v) => updateSet(ex.key, s.id, { kg: v == null ? null : fromDisplay(v, unit) })}
+          />
+          <NumField
+            ariaLabel={`Left reps, set ${i + 1} (decimals like 8.5 allowed)`}
+            max={999}
+            placeholder="L"
+            value={s.reps ?? null}
+            onChange={(v) => updateSet(ex.key, s.id, { reps: v == null ? null : Math.round(v * 100) / 100 })}
+          />
+          <NumField
+            ariaLabel={`Right reps, set ${i + 1} (decimals like 8.5 allowed)`}
+            max={999}
+            placeholder="R"
+            value={s.repsR ?? null}
+            onChange={(v) => updateSet(ex.key, s.id, { repsR: v == null ? null : Math.round(v * 100) / 100 })}
+          />
+        </>
+      ) : kindOf(ex.kind) === "strength" ? (
         <>
           <NumField
             ariaLabel={`Weight in ${unit}, set ${i + 1}`}
@@ -1402,6 +1478,12 @@ export default function Workout({
         </svg>
       </button>
     </div>
+    {sa && !s.warmup && s.prevKg != null && s.prevReps != null && (
+      <p className="mt-0.5 pl-9 text-xs font-medium text-muted">
+        Last time: {formatWeight(s.prevKg, unit)} × {repsText(s.prevReps, s.prevRepsR)}
+      </p>
+    )}
+    </div>
     );
   };
 
@@ -1429,7 +1511,7 @@ export default function Workout({
       key: ex.key,
       name: ex.name,
       count: done.length,
-      volumeKg: done.reduce((sum, s) => sum + (s.kg ?? 0) * (s.reps ?? 0), 0),
+      volumeKg: done.reduce((sum, s) => sum + (s.kg ?? 0) * totalReps(s.reps, s.repsR), 0),
       total:
         kind === "strength"
           ? null
@@ -1439,7 +1521,7 @@ export default function Workout({
       lines: done.map((s) =>
         describeSet(
           kind,
-          { kg: s.kg, reps: s.reps, durationS: s.durationS ?? null, distanceM: s.distanceM ?? null, rpe: s.rpe ?? null },
+          { kg: s.kg, reps: s.reps, repsR: s.repsR ?? null, durationS: s.durationS ?? null, distanceM: s.distanceM ?? null, rpe: s.rpe ?? null },
           unit,
           (kg) => formatWeight(kg, unit),
         ),
@@ -1856,6 +1938,7 @@ export default function Workout({
           if (partner && exercises.indexOf(partner) < exercises.indexOf(ex)) return null; // shown inside its partner's card
           if (partner) {
             const rounds = Math.max(ex.sets.length, partner.sets.length);
+            const bothSa = !!ex.singleArm && !!partner.singleArm;
             return (
               <section key={ex.key} className="rounded-[20px] border-l-[5px] border-accent bg-card p-4 shadow-sm">
                 <div className="mb-2 flex items-center justify-between">
@@ -1871,9 +1954,9 @@ export default function Workout({
                 <div className="mt-2">
                   <div className="grid grid-cols-[36px_1fr_1fr_1fr_44px_36px] gap-2 px-0.5 text-xs font-bold text-muted">
                     <span>Set</span>
-                    <span>Previous</span>
-                    <span className="text-center">{unit}</span>
-                    <span className="text-center">Reps</span>
+                    <span className={bothSa ? "text-center" : ""}>{bothSa ? unit : "Previous"}</span>
+                    <span className="text-center">{bothSa ? "Left" : unit}</span>
+                    <span className="text-center">{bothSa ? "Right" : "Reps"}</span>
                     <span />
                     <span />
                   </div>
@@ -1905,12 +1988,12 @@ export default function Workout({
                 )}
                 <div className="grid grid-cols-[28px_1fr_1fr_1fr_44px_36px] gap-2 px-0.5 text-xs font-bold text-muted">
                   <span>Set</span>
-                  <span>Previous</span>
+                  <span className={ex.singleArm ? "text-center" : ""}>{ex.singleArm ? unit : "Previous"}</span>
                   <span className="text-center">
-                    {kindOf(ex.kind) === "strength" ? unit : kindOf(ex.kind) === "intervals" ? "sec" : "min"}
+                    {ex.singleArm ? "Left" : kindOf(ex.kind) === "strength" ? unit : kindOf(ex.kind) === "intervals" ? "sec" : "min"}
                   </span>
                   <span className="text-center">
-                    {kindOf(ex.kind) === "cardio"
+                    {ex.singleArm ? "Right" : kindOf(ex.kind) === "cardio"
                       ? distUnit(unit)
                       : kindOf(ex.kind) === "sport"
                         ? "Effort"

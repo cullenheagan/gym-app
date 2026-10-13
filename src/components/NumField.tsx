@@ -10,12 +10,14 @@ export default function NumField({
   ariaLabel,
   integer = false,
   max,
+  placeholder,
 }: {
   value: number | null;
   onChange: (v: number | null) => void;
   ariaLabel: string;
   integer?: boolean;
   max?: number;
+  placeholder?: string;
 }) {
   const [text, setText] = useState(value == null ? "" : String(value));
 
@@ -30,6 +32,7 @@ export default function NumField({
     <input
       inputMode={integer ? "numeric" : "decimal"}
       aria-label={ariaLabel}
+      placeholder={placeholder}
       value={text}
       onChange={(e) => {
         setText(e.target.value);

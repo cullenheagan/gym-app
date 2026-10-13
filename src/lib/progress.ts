@@ -2,6 +2,7 @@
 
 import { type Kind, distToDisplay, distUnit, kindOf, secToMin } from "./kinds";
 import type { Unit } from "./units";
+import { sideReps, totalReps } from "./sides";
 
 export type ProgressSet = {
   exerciseId: string;
@@ -11,6 +12,7 @@ export type ProgressSet = {
   gymName: string | null;
   kg: number | null;
   reps: number | null;
+  repsR?: number | null; // right side of a single-arm set; reps is then the left side
   setType: string | null;
   kind?: string | null;
   durationS?: number | null;
@@ -26,7 +28,7 @@ export type Session = {
   date: number; // ms
   gymName: string | null;
   value: Record<Metric, number>; // kg (volume in kg x reps), seconds, meters, seconds per meter, effort 1-10
-  sets: { kg: number; reps: number; durationS?: number; distanceM?: number }[];
+  sets: { kg: number; reps: number; repsR?: number; durationS?: number; distanceM?: number }[];
 };
 
 export type ExerciseProgress = {
@@ -50,7 +52,8 @@ export function buildProgress(rows: ProgressSet[]): ExerciseProgress[] {
     if (r.setType === "warmup") continue;
     const kind = kindOf(r.kind);
     if (kind === "strength") {
-      if (r.kg == null || r.reps == null || r.kg <= 0 || r.reps <= 0) continue;
+      const eff = sideReps(r.reps, r.repsR);
+      if (r.kg == null || eff == null || r.kg <= 0 || eff <= 0) continue;
     } else if (!((r.durationS ?? 0) > 0 || (r.distanceM ?? 0) > 0)) {
       continue;
     }
@@ -62,10 +65,11 @@ export function buildProgress(rows: ProgressSet[]): ExerciseProgress[] {
       ex.sessions.set(r.workoutId, s);
     }
     if (kind === "strength") {
-      s.sets.push({ kg: r.kg as number, reps: r.reps as number });
-      s.value.e1rm = Math.max(s.value.e1rm, epley(r.kg as number, r.reps as number));
+      const eff = sideReps(r.reps, r.repsR) as number;
+      s.sets.push({ kg: r.kg as number, reps: r.reps ?? 0, ...(r.repsR != null ? { repsR: Number(r.repsR) } : {}) });
+      s.value.e1rm = Math.max(s.value.e1rm, epley(r.kg as number, eff));
       s.value.top = Math.max(s.value.top, r.kg as number);
-      s.value.volume += (r.kg as number) * (r.reps as number);
+      s.value.volume += (r.kg as number) * totalReps(r.reps, r.repsR);
     } else {
       s.sets.push({ kg: 0, reps: r.reps ?? 0, durationS: r.durationS ?? 0, distanceM: r.distanceM ?? 0 });
       s.value.time += r.durationS ?? 0;

@@ -6,6 +6,7 @@ import { type Unit, toDisplay } from "@/lib/units";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { explain } from "@/lib/net";
 import { describeSet, kindOf, type Kind } from "@/lib/kinds";
+import { repsText } from "@/lib/sides";
 import {
   type ExerciseProgress,
   type Metric,
@@ -29,6 +30,7 @@ type Row = {
   set_type: string | null;
   weight_kg: number | null;
   reps: number | null;
+  reps_right?: number | null;
   duration_s: number | null;
   distance_m: number | null;
   rpe: number | null;
@@ -64,7 +66,7 @@ async function loadRows(db: SupabaseClient, userId: string): Promise<ProgressSet
     const { data, error } = await db
       .from("workout_sets")
       .select(
-        "exercise_id,set_type,weight_kg,reps,duration_s,distance_m,rpe,exercise:exercises(name,kind),workout:workouts(id,started_at,gym:gyms(name))",
+        "exercise_id,set_type,weight_kg,reps,reps_right,duration_s,distance_m,rpe,exercise:exercises(name,kind),workout:workouts(id,started_at,gym:gyms(name))",
       )
       .eq("user_id", userId)
       .order("id", { ascending: true })
@@ -83,6 +85,7 @@ async function loadRows(db: SupabaseClient, userId: string): Promise<ProgressSet
         gymName: one(w.gym)?.name ?? null,
         kg: r.weight_kg == null ? null : Number(r.weight_kg),
         reps: r.reps == null ? null : Number(r.reps),
+        repsR: r.reps_right == null ? null : Number(r.reps_right),
         setType: r.set_type,
         kind: ex.kind ?? null,
         durationS: r.duration_s,
@@ -252,7 +255,7 @@ function Detail({ ex, unit, onBack }: { ex: ExerciseProgress; unit: Unit; onBack
               {s.sets
                 .map((t) =>
                   ex.kind === "strength"
-                    ? `${Math.round(toDisplay(t.kg, unit) * 10) / 10} x ${t.reps}`
+                    ? `${Math.round(toDisplay(t.kg, unit) * 10) / 10} x ${repsText(t.reps, t.repsR)}`
                     : describeSet(ex.kind, { kg: null, reps: t.reps, durationS: t.durationS ?? null, distanceM: t.distanceM ?? null, rpe: null }, unit, String),
                 )
                 .join(" · ")}

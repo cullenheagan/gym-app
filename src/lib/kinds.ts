@@ -1,3 +1,4 @@
+import { repsText } from "./sides";
 // Workout types. A workout (and each exercise) has a kind, and the kind decides what a set records:
 //   strength  weight x reps (weight optional for bodyweight)
 //   cardio    time and distance
@@ -68,6 +69,7 @@ export function fmtPace(seconds: number, meters: number, u: Unit): string | null
 export type SetFacts = {
   kg: number | null;
   reps: number | null;
+  repsR?: number | null; // right-side reps of a single-arm set (reps is then the left side)
   durationS: number | null;
   distanceM: number | null;
   rpe: number | null;
@@ -75,7 +77,7 @@ export type SetFacts = {
 
 // One-line description of a set for History and Previous: "135 x 8", "32 min · 5 mi", "45 s", "60 min · effort 7".
 export function describeSet(kind: Kind, s: SetFacts, u: Unit, formatKg: (kg: number) => string): string {
-  if (kind === "strength") return `${formatKg(s.kg ?? 0)} × ${s.reps ?? 0}`;
+  if (kind === "strength") return `${formatKg(s.kg ?? 0)} × ${repsText(s.reps, s.repsR)}`;
   const parts: string[] = [];
   if (s.durationS != null) parts.push(fmtSeconds(s.durationS));
   if (kind === "cardio" && s.distanceM != null) parts.push(`${distToDisplay(s.distanceM, u)} ${distUnit(u)}`);
