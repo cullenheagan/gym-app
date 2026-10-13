@@ -1627,7 +1627,7 @@ export default function Workout({
                   if (e.key === "Escape") setAddingGym(false);
                 }}
                 placeholder="Gym name"
-                className="h-11 min-w-0 flex-1 rounded-xl border-2 border-accent bg-card px-3 text-sm font-semibold outline-none"
+                className="h-11 min-w-0 flex-1 rounded-xl border-2 border-accent bg-card px-3 text-base font-semibold outline-none"
               />
               <button type="button" onClick={saveGym} className="h-11 rounded-xl bg-accent px-4 text-sm font-bold text-on-accent">
                 Save
@@ -1665,7 +1665,7 @@ export default function Workout({
                   if (e.key === "Enter" && query.trim()) createExercise();
                 }}
                 placeholder="Search, or type a new name"
-                className="h-11 min-w-0 flex-1 rounded-xl border-2 border-accent bg-card px-3 text-sm font-semibold outline-none"
+                className="h-11 min-w-0 flex-1 rounded-xl border-2 border-accent bg-card px-3 text-base font-semibold outline-none"
               />
               <button type="button" onClick={closePicker} className="h-11 rounded-xl bg-field px-3 text-sm font-bold text-muted">
                 Cancel
@@ -1731,7 +1731,7 @@ export default function Workout({
                     id="exercise-type"
                     value={newType}
                     onChange={(e) => setNewType(e.target.value)}
-                    className="h-11 w-full appearance-none rounded-xl border border-line bg-field pl-3 pr-10 text-sm font-semibold text-ink"
+                    className="h-11 w-full appearance-none rounded-xl border border-line bg-field pl-3 pr-10 text-base font-semibold text-ink"
                   >
                     {EQUIPMENT.map((e) => (
                       <option key={e.value} value={e.value}>

@@ -195,7 +195,7 @@ export default function SetupPanel({
                 onBlur={() => savePin(selected)}
                 onKeyDown={(e) => e.key === "Enter" && savePin(selected)}
                 placeholder="e.g. hole 4"
-                className="mt-0.5 h-10 w-full rounded-lg border-2 border-accent bg-card px-2 text-sm font-semibold outline-none"
+                className="mt-0.5 h-10 w-full rounded-lg border-2 border-accent bg-card px-2 text-base font-semibold outline-none"
               />
             ) : (
               <button
@@ -220,13 +220,13 @@ export default function SetupPanel({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Name (Bench by the window)"
-            className="h-11 rounded-xl border border-line bg-card px-3 text-sm font-semibold"
+            className="h-11 rounded-xl border border-line bg-card px-3 text-base font-semibold"
           />
           <input
             value={pin}
             onChange={(e) => setPin(e.target.value)}
             placeholder="Pin position (hole 4, notch 3...)"
-            className="h-11 rounded-xl border border-line bg-card px-3 text-sm font-semibold"
+            className="h-11 rounded-xl border border-line bg-card px-3 text-base font-semibold"
           />
           <div className="flex items-center gap-3">
             {preview ? (

@@ -166,7 +166,7 @@ function FilterSelect({
         aria-label={`Filter by ${label.toLowerCase()}`}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`h-10 w-full appearance-none truncate rounded-full border bg-card pl-4 pr-9 text-sm font-semibold ${
+        className={`h-10 w-full appearance-none truncate rounded-full border bg-card pl-4 pr-9 text-base font-semibold ${
           value ? "border-accent text-accent" : "border-line text-ink"
         }`}
       >

@@ -3,6 +3,7 @@
 Newest first. Each entry says what changed and why. Mirrored in the Notion "Gym App" wiki.
 
 ## 2026-10-13
+- Fix, Safari zoom: tapping a text box no longer zooms the page in. The exercise search, Progress search, gym name, bench setup name and the dropdowns used 14px text, and Safari zooms into any box under 16px, so they are now 16px. Pinch-to-zoom still works. No database change.
 - Supersets: a dashed Superset? button under an exercise's bench/seat setup opens the exercise picker for the second exercise. The two become one linked card with a blue edge and a SUPERSET badge, A and B tags on each exercise, and rows that alternate 1a, 1b, 2a, 2b. Add set adds a round to both exercises and removing a set removes that round from both; Unlink splits them back into two normal exercises, and removing one exercise leaves the other normal. Repeating a past workout (from History or Home) brings the pairs back exactly, but adding an exercise by hand never pairs it automatically. History shows a Superset badge and the CSV has a superset_group column at the end. Pairs only for now; three or more exercises is planned. Totals, Est. 1RM, Progress and suggestions still work per exercise. Migration 0013 adds workout_sets.superset_id (uuid, empty for normal sets); existing data untouched.
 
 ## 2026-10-12

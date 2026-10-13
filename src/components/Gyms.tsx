@@ -371,7 +371,7 @@ export default function Gyms({
               if (e.key === "Escape") setAdding(false);
             }}
             placeholder="Gym name"
-            className="h-11 min-w-0 flex-1 rounded-xl border-2 border-accent bg-card px-3 text-sm font-semibold outline-none"
+            className="h-11 min-w-0 flex-1 rounded-xl border-2 border-accent bg-card px-3 text-base font-semibold outline-none"
           />
           <button
             type="button"

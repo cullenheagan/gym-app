@@ -290,7 +290,7 @@ export default function Progress({ db, userId, unit }: { db: SupabaseClient; use
       <p className="px-1 text-[13px] text-muted">Tap an exercise to see how it is trending</p>
       {error && <p role="alert" className="mt-3 rounded-[14px] bg-tint px-4 py-3 text-[13px] font-semibold text-accent">{error}{rows ? " Showing your last saved copy." : ""}</p>}
       <label htmlFor="pq" className="sr-only">Search exercises</label>
-      <input id="pq" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search exercises" className="mt-3 h-11 w-full rounded-full border border-line bg-card px-4 text-sm outline-none" />
+      <input id="pq" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search exercises" className="mt-3 h-11 w-full rounded-full border border-line bg-card px-4 text-base outline-none" />
       {rows == null && !error && <p className="mt-6 text-center text-sm text-muted">Loading...</p>}
       {rows != null && all.length === 0 && <p className="mt-6 rounded-[20px] bg-card p-5 text-center text-sm text-muted shadow-sm">Finish a workout and your exercises show up here.</p>}
       <ul className="mt-3 space-y-3">
