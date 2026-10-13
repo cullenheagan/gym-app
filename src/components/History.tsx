@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Unit, formatWeight, toDisplay } from "@/lib/units";
 import { type Kind, describeSet, distToDisplay, distUnit, fmtSeconds, kindLabel, kindOf } from "@/lib/kinds";
 import { formatDate, formatDuration } from "@/lib/format";
+import { clockOf, resolveEnd, showClock } from "@/lib/endtime";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { downloadCsv, exportAllSets } from "@/lib/csv";
 import { explain } from "@/lib/net";
@@ -215,6 +216,11 @@ export default function History({
   const [typeFilter, setTypeFilter] = useState("");
   const [exporting, setExporting] = useState(false);
   const [exportNote, setExportNote] = useState<string | null>(null);
+  // Editing the end time of a past workout (for when you forgot to finish it).
+  const [timeId, setTimeId] = useState<string | null>(null);
+  const [timeClock, setTimeClock] = useState("");
+  const [timeErr, setTimeErr] = useState<string | null>(null);
+  const [timeSaving, setTimeSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -262,6 +268,38 @@ export default function History({
     }
     setWorkouts((all) => (all ?? []).filter((w) => w.id !== id));
     setOpenId(null);
+  }
+
+  function startTimeEdit(w: RawWorkout) {
+    setTimeId(w.id);
+    setTimeClock(clockOf(w.ended_at ? ms(w.ended_at) : ms(w.started_at)));
+    setTimeErr(null);
+  }
+
+  async function saveTime(w: RawWorkout) {
+    const times = w.workout_sets.map((s) => ms(s.completed_at)).filter((t) => Number.isFinite(t));
+    const r = resolveEnd(timeClock, {
+      startedAt: ms(w.started_at),
+      lastSetAt: times.length ? Math.max(...times) : null,
+      now: Date.now(),
+    });
+    if (!r.ok) {
+      setTimeErr(r.error);
+      return;
+    }
+    setTimeSaving(true);
+    setTimeErr(null);
+    const iso = new Date(r.ms).toISOString();
+    const res = await db.from("workouts").update({ ended_at: iso }).eq("id", w.id);
+    setTimeSaving(false);
+    if (res.error) {
+      setTimeErr(explain(res.error.message, "Could not save the new time."));
+      return;
+    }
+    const next = (workouts ?? []).map((x) => (x.id === w.id ? { ...x, ended_at: iso } : x));
+    setWorkouts(next);
+    writeCache(cacheKey(userId, "history"), next.slice(0, 50));
+    setTimeId(null);
   }
 
   async function exportCsv() {
@@ -413,6 +451,62 @@ export default function History({
 
             {open && (
               <div className="mx-4 border-t border-line pb-4 pt-3">
+                <div className="mb-3 rounded-2xl bg-field p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[13px] font-semibold text-muted">
+                      {showClock(ms(w.started_at))} to {w.ended_at ? showClock(ms(w.ended_at)) : "not finished"}
+                      {sum.total != null ? ` · ${formatDuration(sum.total)}` : ""}
+                    </p>
+                    {timeId !== w.id && (
+                      <button
+                        type="button"
+                        onClick={() => startTimeEdit(w)}
+                        className="h-8 shrink-0 rounded-full border border-line px-3 text-xs font-bold"
+                      >
+                        Edit time
+                      </button>
+                    )}
+                  </div>
+                  {timeId === w.id && (
+                    <div className="mt-3 flex flex-col gap-2">
+                      <label className="flex items-center justify-between gap-3 text-sm font-bold">
+                        Ended at
+                        <input
+                          type="time"
+                          value={timeClock}
+                          onChange={(e) => {
+                            setTimeClock(e.target.value);
+                            setTimeErr(null);
+                          }}
+                          className="h-11 min-w-[8.5rem] rounded-xl border border-line bg-card px-3 text-center text-base font-semibold"
+                        />
+                      </label>
+                      {timeErr && (
+                        <p role="alert" className="text-[13px] font-semibold text-red-600">
+                          {timeErr}
+                        </p>
+                      )}
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setTimeId(null)}
+                          disabled={timeSaving}
+                          className="h-11 flex-1 rounded-[14px] border border-line text-sm font-bold"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => saveTime(w)}
+                          disabled={timeSaving}
+                          className="h-11 flex-1 rounded-[14px] bg-accent text-sm font-bold text-on-accent disabled:opacity-60"
+                        >
+                          {timeSaving ? "Saving..." : "Save"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <ol className="flex flex-col gap-3">
                   {sum.exercises.map((ex, i) => (
                     <li key={ex.exerciseId ?? ex.name}>

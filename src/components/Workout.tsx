@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Unit, formatWeight, fromDisplay, toDisplay } from "@/lib/units";
 import { formatClock, formatDate } from "@/lib/format";
+import { clockOf, resolveEnd, showClock } from "@/lib/endtime";
 import { suggest } from "@/lib/suggest";
 import {
   type Kind,
@@ -300,6 +301,10 @@ export default function Workout({
   // The Train sub-tab to come back to when the Train button is tapped.
   const [trainTab, setTrainTab] = useState<"log" | "history" | "gyms" | "progress">("log");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // The "Ended at" step before saving: prefilled with now, editable if you forgot to finish.
+  const [finishing, setFinishing] = useState(false);
+  const [endClock, setEndClock] = useState("");
+  const [endEdited, setEndEdited] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [pending, setPending] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -1033,6 +1038,8 @@ export default function Workout({
       return;
     }
     setExercises([]);
+    setFinishing(false);
+    setEndEdited(false);
     setWorkoutStarted(false);
     setWorkoutKind("strength");
     setTitle("Workout");
@@ -1042,15 +1049,40 @@ export default function Workout({
     setView("home");
   }
 
+  // When the last finished set was marked done, so the end time can't be set before it.
+  function lastSetMs(): number | null {
+    const times = exercises.flatMap((e) => e.sets).filter((s) => s.done && s.doneAt).map((s) => Date.parse(s.doneAt as string));
+    return times.length ? Math.max(...times) : null;
+  }
+
+  function openFinish() {
+    if (!exercises.some((ex) => ex.sets.some((s) => s.done))) {
+      setMessage({ kind: "error", text: "Mark at least one set done before finishing." });
+      return;
+    }
+    setMessage(null);
+    setEndClock(clockOf(Date.now()));
+    setEndEdited(false);
+    setFinishing(true);
+  }
+
   async function finishWorkout() {
     const withDone = exercises.filter((ex) => ex.sets.some((s) => s.done));
     if (withDone.length === 0) {
       setMessage({ kind: "error", text: "Mark at least one set done before finishing." });
       return;
     }
+    let finishedAt = new Date().toISOString();
+    if (endEdited) {
+      const r = resolveEnd(endClock, { startedAt: Date.parse(startedAt), lastSetAt: lastSetMs(), now: Date.now() });
+      if (!r.ok) {
+        setMessage({ kind: "error", text: r.error });
+        return;
+      }
+      finishedAt = new Date(r.ms).toISOString();
+    }
     setSaving(true);
     setMessage(null);
-    const finishedAt = new Date().toISOString();
     const workoutId = newId();
 
     // Drafts from before the picker existed may hold exercises that are not in the library yet.
@@ -1119,6 +1151,8 @@ export default function Workout({
       return;
     }
     setExercises([]);
+    setFinishing(false);
+    setEndEdited(false);
     setWorkoutStarted(false);
     setWorkoutKind("strength");
     setTitle("Workout");
@@ -1919,17 +1953,55 @@ export default function Workout({
 
         {exercises.length > 0 && (
           <>
-            <button
-              type="button"
-              onClick={finishWorkout}
-              disabled={saving}
-              className="h-12 w-full rounded-[14px] bg-done text-base font-bold text-on-accent disabled:opacity-60"
-            >
-              {saving ? "Saving..." : "Finish workout"}
-            </button>
-            <button type="button" onClick={discardWorkout} className="h-11 w-full text-sm font-bold text-muted">
-              {confirmDiscard ? "Tap again to discard this workout" : "Discard workout"}
-            </button>
+            {finishing ? (
+              <div className="flex flex-col gap-3 rounded-[20px] bg-card p-4 shadow-sm">
+                <div>
+                  <p className="text-base font-extrabold">Finish workout</p>
+                  <p className="mt-0.5 text-[13px] font-medium text-muted">
+                    Started {showClock(Date.parse(startedAt))}
+                    {lastSetMs() != null ? ` · last set ${showClock(lastSetMs() as number)}` : ""}
+                  </p>
+                </div>
+                <label className="flex items-center justify-between gap-3 text-sm font-bold">
+                  Ended at
+                  <input
+                    type="time"
+                    value={endClock}
+                    onChange={(e) => {
+                      setEndClock(e.target.value);
+                      setEndEdited(true);
+                      setMessage(null);
+                    }}
+                    className="h-11 min-w-[8.5rem] rounded-xl border border-line bg-card px-3 text-center text-base font-semibold"
+                  />
+                </label>
+                <p className="text-[13px] font-medium text-muted">Prefilled with now. Change it if you forgot to finish.</p>
+                <button
+                  type="button"
+                  onClick={finishWorkout}
+                  disabled={saving}
+                  className="h-12 w-full rounded-[14px] bg-done text-base font-bold text-on-accent disabled:opacity-60"
+                >
+                  {saving ? "Saving..." : "Finish workout"}
+                </button>
+                <button type="button" onClick={() => setFinishing(false)} disabled={saving} className="h-11 w-full text-sm font-bold text-muted">
+                  Back to workout
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={openFinish}
+                  className="h-12 w-full rounded-[14px] bg-done text-base font-bold text-on-accent"
+                >
+                  Finish workout
+                </button>
+                <button type="button" onClick={discardWorkout} className="h-11 w-full text-sm font-bold text-muted">
+                  {confirmDiscard ? "Tap again to discard this workout" : "Discard workout"}
+                </button>
+              </>
+            )}
           </>
         )}
       </div>
