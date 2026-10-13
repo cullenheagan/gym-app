@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Gym } from "@/lib/types";
-import { equipmentLabel } from "@/lib/equipment";
+import { EQUIPMENT, equipmentLabel } from "@/lib/equipment";
 import { PHOTO_BUCKET, compressPhoto, uploadPhoto } from "@/lib/photo";
 import { explain } from "@/lib/net";
+import PhotoViewer from "./PhotoViewer";
 
 type Machine = {
   id: string;
@@ -53,6 +54,8 @@ export default function Gyms({
   catalog,
   onCatalogChange,
   machineUrls,
+  onReplacePhoto,
+  onDeletePhoto,
   currentGymId,
   onChange,
 }: {
@@ -62,6 +65,8 @@ export default function Gyms({
   catalog: Machine[];
   onCatalogChange: (update: (all: Machine[]) => Machine[]) => void;
   machineUrls: Record<string, string>;
+  onReplacePhoto: (machineId: string, file: File) => Promise<string | null>;
+  onDeletePhoto: (machineId: string) => Promise<string | null>;
   currentGymId: string;
   onChange: (update: (all: Gym[]) => Gym[]) => void;
 }) {
@@ -78,6 +83,219 @@ export default function Gyms({
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const photoTarget = useRef<string | null>(null);
+  const [viewing, setViewing] = useState<{ kind: "gym" | "machine"; id: string } | null>(null);
+  // The small edit form for one gym or machine. deletable: null while checking, false once history exists.
+  const [editing, setEditing] = useState<{ kind: "gym" | "machine"; id: string; name: string; equip: string; deletable: boolean | null } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const machineTypes = EQUIPMENT.filter((e) => !e.anyGym);
+
+  // A gym or machine can only be deleted for good if nothing was ever logged with it.
+  async function checkDeletable(kind: "gym" | "machine", id: string): Promise<boolean> {
+    if (kind === "machine") {
+      const r = await db.from("workout_sets").select("id", { count: "exact", head: true }).eq("exercise_id", id);
+      return !r.error && r.count === 0;
+    }
+    const w = await db.from("workouts").select("id", { count: "exact", head: true }).eq("gym_id", id);
+    if (w.error || w.count !== 0) return false;
+    const ids = catalog.filter((c) => c.gym_id === id).map((c) => c.id);
+    if (ids.length === 0) return true;
+    const r = await db.from("workout_sets").select("id", { count: "exact", head: true }).in("exercise_id", ids);
+    return !r.error && r.count === 0;
+  }
+
+  function startEdit(kind: "gym" | "machine", id: string, name: string, equip: string) {
+    setError(null);
+    setConfirmDelete(false);
+    setEditing({ kind, id, name, equip, deletable: null });
+    checkDeletable(kind, id).then((ok) =>
+      setEditing((cur) => (cur && cur.kind === kind && cur.id === id ? { ...cur, deletable: ok } : cur)),
+    );
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    const label = editing.name.trim();
+    if (!label) {
+      setError("Give it a name first.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    if (editing.kind === "gym") {
+      const res = await db.from("gyms").update({ name: label }).eq("id", editing.id);
+      if (res.error) setError(explain(res.error.message, "Could not rename the gym."));
+      else {
+        onChange((all) => all.map((g) => (g.id === editing.id ? { ...g, name: label } : g)));
+        setEditing(null);
+      }
+    } else {
+      const res = await db.from("exercises").update({ name: label, equipment_type: editing.equip }).eq("id", editing.id);
+      if (res.error) setError(explain(res.error.message, "Could not save the machine."));
+      else {
+        onCatalogChange((all) => all.map((m) => (m.id === editing.id ? { ...m, name: label, equipment_type: editing.equip } : m)));
+        setEditing(null);
+      }
+    }
+    setBusy(false);
+  }
+
+  // Delete forever. Only offered when checkDeletable said nothing was logged with it.
+  async function deleteForever() {
+    if (!editing || editing.deletable !== true) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      window.setTimeout(() => setConfirmDelete(false), 4000);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const { kind, id } = editing;
+    const paths: string[] = [];
+    if (kind === "machine") {
+      const m = catalog.find((c) => c.id === id);
+      if (m?.photo_path) paths.push(m.photo_path);
+      const sp = await db.from("exercise_setups").select("photo_path").eq("exercise_id", id);
+      for (const r of (sp.data ?? []) as { photo_path: string | null }[]) if (r.photo_path) paths.push(r.photo_path);
+      const del = await db.from("exercises").delete().eq("id", id);
+      if (del.error) {
+        setBusy(false);
+        setError(explain(del.error.message, "Could not delete the machine."));
+        return;
+      }
+      onCatalogChange((all) => all.filter((c) => c.id !== id));
+    } else {
+      const g = gyms.find((x) => x.id === id);
+      if (g?.photo_path) paths.push(g.photo_path);
+      for (const m of catalog.filter((c) => c.gym_id === id)) if (m.photo_path) paths.push(m.photo_path);
+      const sp = await db.from("exercise_setups").select("photo_path").eq("gym_id", id);
+      for (const r of (sp.data ?? []) as { photo_path: string | null }[]) if (r.photo_path) paths.push(r.photo_path);
+      const dm = await db.from("exercises").delete().eq("gym_id", id);
+      if (dm.error) {
+        setBusy(false);
+        setError(explain(dm.error.message, "Could not delete the gym's machines."));
+        return;
+      }
+      const dg = await db.from("gyms").delete().eq("id", id);
+      if (dg.error) {
+        setBusy(false);
+        setError(explain(dg.error.message, "Could not delete the gym."));
+        return;
+      }
+      onCatalogChange((all) => all.filter((c) => c.gym_id !== id));
+      onChange((all) => all.filter((x) => x.id !== id));
+      setOpenId(null);
+    }
+    if (paths.length > 0) await db.storage.from(PHOTO_BUCKET).remove(paths);
+    setBusy(false);
+    setConfirmDelete(false);
+    setEditing(null);
+  }
+
+  // The name / type form with the delete choice, shared by gyms and machines.
+  function editForm(kind: "gym" | "machine") {
+    if (!editing || editing.kind !== kind) return null;
+    return (
+      <div className="mt-2 rounded-[14px] bg-field p-3">
+        <label className="text-xs font-bold text-muted" htmlFor={`edit-${editing.id}`}>
+          Name
+        </label>
+        <input
+          id={`edit-${editing.id}`}
+          autoFocus
+          value={editing.name}
+          onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") saveEdit();
+            if (e.key === "Escape") setEditing(null);
+          }}
+          className="mt-0.5 h-11 w-full rounded-xl border-2 border-accent bg-card px-3 text-base font-semibold outline-none"
+        />
+        {kind === "machine" && (
+          <>
+            <label className="mt-2 block text-xs font-bold text-muted" htmlFor={`type-${editing.id}`}>
+              Type
+            </label>
+            <select
+              id={`type-${editing.id}`}
+              value={editing.equip}
+              onChange={(e) => setEditing({ ...editing, equip: e.target.value })}
+              className="mt-0.5 h-11 w-full rounded-xl border border-line bg-card px-3 text-base font-semibold"
+            >
+              {machineTypes.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+              {!machineTypes.some((t) => t.value === editing.equip) && (
+                <option value={editing.equip}>{equipmentLabel(editing.equip)}</option>
+              )}
+            </select>
+          </>
+        )}
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            onClick={saveEdit}
+            disabled={busy}
+            className="h-11 flex-1 rounded-[14px] bg-accent text-sm font-bold text-on-accent disabled:opacity-60"
+          >
+            {busy ? "Saving..." : "Save"}
+          </button>
+          <button type="button" onClick={() => setEditing(null)} className="h-11 rounded-[14px] bg-card px-4 text-sm font-bold text-muted">
+            Cancel
+          </button>
+        </div>
+        {editing.deletable === true ? (
+          <>
+            <button
+              type="button"
+              onClick={deleteForever}
+              disabled={busy}
+              className="mt-3 h-11 w-full rounded-[14px] bg-card text-sm font-bold text-red-600 disabled:opacity-60"
+            >
+              {confirmDelete ? "Tap again to delete forever" : "Delete forever"}
+            </button>
+            <p className="mt-1.5 text-[13px] font-medium text-muted">
+              Nothing was ever logged with this {kind === "gym" ? "gym" : "machine"}, so it can be deleted for good.
+            </p>
+          </>
+        ) : (
+          <p className="mt-3 text-[13px] font-medium text-muted">
+            {editing.deletable === null
+              ? "Checking if it can be deleted..."
+              : "Workouts were logged with this, so it can only be removed (hidden). That keeps your history."}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // Replace or delete a gym's photo (from the full-screen viewer).
+  async function replaceGymPhoto(id: string, file: File): Promise<string | null> {
+    try {
+      const blob = await compressPhoto(file);
+      const path = `${userId}/gym-${id}.jpg`;
+      const up = await uploadPhoto(db, path, blob);
+      if (up.error) throw new Error(up.error);
+      const upd = await db.from("gyms").update({ photo_path: path }).eq("id", id);
+      if (upd.error) throw new Error(upd.error.message);
+      onChange((all) => all.map((g) => (g.id === id ? { ...g, photo_path: path } : g)));
+      const url = up.url;
+      if (url) setUrls((cur) => ({ ...cur, [path]: url }));
+      return null;
+    } catch (e) {
+      return explain(e instanceof Error ? e.message : null, "Could not save the photo.");
+    }
+  }
+
+  async function deleteGymPhoto(id: string): Promise<string | null> {
+    const path = gyms.find((g) => g.id === id)?.photo_path;
+    const upd = await db.from("gyms").update({ photo_path: null }).eq("id", id);
+    if (upd.error) return explain(upd.error.message, "Could not delete the photo.");
+    if (path) await db.storage.from(PHOTO_BUCKET).remove([path]);
+    onChange((all) => all.map((g) => (g.id === id ? { ...g, photo_path: null } : g)));
+    return null;
+  }
 
   // Removing a machine only hides it (archived_at); its logged sets stay in History and Progress.
   async function setMachineRemoved(id: string, removed: boolean) {
@@ -229,15 +447,22 @@ export default function Gyms({
         return (
           <article key={g.id} className="overflow-hidden rounded-[20px] bg-card shadow-sm">
             {photo ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={photo}
-                alt={`${g.name}`}
-                className="h-36 w-full object-cover"
-                onError={(e) => {
-                  e.currentTarget.style.display = "none";
-                }}
-              />
+              <button
+                type="button"
+                onClick={() => setViewing({ kind: "gym", id: g.id })}
+                aria-label={`View photo of ${g.name}`}
+                className="block w-full"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={photo}
+                  alt={`${g.name}`}
+                  className="h-36 w-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                  }}
+                />
+              </button>
             ) : null}
             <button
               type="button"
@@ -269,17 +494,24 @@ export default function Gyms({
                     {machines.map((m) => {
                       const url = m.photo_path ? machineUrls[m.photo_path] : undefined;
                       return (
-                        <li key={m.id} className="flex items-center gap-3">
+                        <li key={m.id} className="flex flex-wrap items-center gap-3">
                           {url ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={url}
-                              alt=""
-                              className="h-11 w-11 shrink-0 rounded-lg object-cover"
-                              onError={(e) => {
-                                e.currentTarget.style.visibility = "hidden";
-                              }}
-                            />
+                            <button
+                              type="button"
+                              onClick={() => setViewing({ kind: "machine", id: m.id })}
+                              aria-label={`View photo of ${m.name}`}
+                              className="shrink-0"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={url}
+                                alt=""
+                                className="h-11 w-11 rounded-lg object-cover"
+                                onError={(e) => {
+                                  e.currentTarget.style.visibility = "hidden";
+                                }}
+                              />
+                            </button>
                           ) : (
                             <span className="h-11 w-11 shrink-0 rounded-lg bg-field" />
                           )}
@@ -291,11 +523,19 @@ export default function Gyms({
                           </span>
                           <button
                             type="button"
+                            onClick={() => (editing?.kind === "machine" && editing.id === m.id ? setEditing(null) : startEdit("machine", m.id, m.name, m.equipment_type))}
+                            className="ml-auto h-9 shrink-0 rounded-lg px-3 text-[13px] font-bold text-accent"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => setMachineRemoved(m.id, true)}
-                            className="ml-auto h-9 shrink-0 rounded-lg px-3 text-[13px] font-bold text-red-600"
+                            className="h-9 shrink-0 rounded-lg px-3 text-[13px] font-bold text-red-600"
                           >
                             {confirmMachine === m.id ? "Tap again" : "Remove"}
                           </button>
+                          {editing?.kind === "machine" && editing.id === m.id && <div className="w-full">{editForm("machine")}</div>}
                         </li>
                       );
                     })}
@@ -331,10 +571,21 @@ export default function Gyms({
                   </div>
                 )}
 
+                {editing?.kind === "gym" && editing.id === g.id ? (
+                  <div className="mt-4">{editForm("gym")}</div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => startEdit("gym", g.id, g.name, "")}
+                    className="mt-4 h-11 w-full rounded-[14px] bg-field text-sm font-bold"
+                  >
+                    Edit gym name
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => choosePhoto(g.id)}
-                  className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-[14px] bg-field text-sm font-bold"
+                  className="mt-2 flex h-11 w-full items-center justify-center gap-2 rounded-[14px] bg-field text-sm font-bold"
                 >
                   <CameraIcon />
                   {g.photo_path ? "Change gym photo" : "Add a gym photo"}
@@ -419,6 +670,24 @@ export default function Gyms({
           )}
         </div>
       )}
+
+      {viewing &&
+        (() => {
+          const g = viewing.kind === "gym" ? gyms.find((x) => x.id === viewing.id) : null;
+          const m = viewing.kind === "machine" ? catalog.find((x) => x.id === viewing.id) : null;
+          const path = g?.photo_path ?? m?.photo_path ?? null;
+          const url = path ? (viewing.kind === "gym" ? urls[path] : machineUrls[path]) : undefined;
+          if (!url) return null;
+          return (
+            <PhotoViewer
+              url={url}
+              title={g?.name ?? m?.name ?? "Photo"}
+              onClose={() => setViewing(null)}
+              onReplace={(file) => (viewing.kind === "gym" ? replaceGymPhoto(viewing.id, file) : onReplacePhoto(viewing.id, file))}
+              onDelete={() => (viewing.kind === "gym" ? deleteGymPhoto(viewing.id) : onDeletePhoto(viewing.id))}
+            />
+          );
+        })()}
 
       <input
         ref={fileInput}

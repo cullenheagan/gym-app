@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { PHOTO_BUCKET, compressPhoto, uploadPhoto } from "@/lib/photo";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { explain } from "@/lib/net";
+import PhotoViewer from "./PhotoViewer";
 
 type Setup = { id: string; name: string; pin_position: string | null; photo_path: string | null };
 
@@ -34,6 +35,9 @@ export default function SetupPanel({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [editPin, setEditPin] = useState<string | null>(null);
+  const [viewing, setViewing] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null); // the new name while the rename box is open
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -43,6 +47,7 @@ export default function SetupPanel({
         .from("exercise_setups")
         .select("id,name,pin_position,photo_path")
         .eq("exercise_id", exerciseId)
+        .is("archived_at", null)
         .order("created_at", { ascending: true });
       q = gymId ? q.eq("gym_id", gymId) : q.is("gym_id", null);
       const res = await q;
@@ -154,6 +159,66 @@ export default function SetupPanel({
     setSetups((all) => (all ?? []).map((x) => (x.id === s.id ? { ...x, pin_position: next } : x)));
   }
 
+  async function saveName(s: Setup) {
+    const next = (renaming ?? "").trim();
+    if (!next) {
+      setError("Give this setup a name.");
+      return;
+    }
+    setRenaming(null);
+    setError(null);
+    if (next === s.name) return;
+    const res = await db.from("exercise_setups").update({ name: next }).eq("id", s.id);
+    if (res.error) {
+      setError(explain(res.error.message, "Could not rename the setup."));
+      return;
+    }
+    setSetups((all) => (all ?? []).map((x) => (x.id === s.id ? { ...x, name: next } : x)));
+  }
+
+  // Removing a setup only hides it, so old workouts still show its name and pin.
+  async function removeSetup(s: Setup) {
+    if (!confirmRemove) {
+      setConfirmRemove(true);
+      window.setTimeout(() => setConfirmRemove(false), 4000);
+      return;
+    }
+    setConfirmRemove(false);
+    setError(null);
+    const res = await db.from("exercise_setups").update({ archived_at: new Date().toISOString() }).eq("id", s.id);
+    if (res.error) {
+      setError(explain(res.error.message, "Could not remove the setup."));
+      return;
+    }
+    setSetups((all) => (all ?? []).filter((x) => x.id !== s.id));
+    if (value === s.id) onChange(null);
+  }
+
+  async function replaceSetupPhoto(s: Setup, file: File): Promise<string | null> {
+    try {
+      const b = await compressPhoto(file);
+      const path = `${userId}/setup-${s.id}.jpg`;
+      const up = await uploadPhoto(db, path, b);
+      if (up.error) throw new Error(up.error);
+      const upd = await db.from("exercise_setups").update({ photo_path: path }).eq("id", s.id);
+      if (upd.error) throw new Error(upd.error.message);
+      setSetups((all) => (all ?? []).map((x) => (x.id === s.id ? { ...x, photo_path: path } : x)));
+      const url = up.url;
+      if (url) setUrls((m) => ({ ...m, [path]: url }));
+      return null;
+    } catch (e) {
+      return explain(e instanceof Error ? e.message : null, "Could not save the photo.");
+    }
+  }
+
+  async function deleteSetupPhoto(s: Setup): Promise<string | null> {
+    const upd = await db.from("exercise_setups").update({ photo_path: null }).eq("id", s.id);
+    if (upd.error) return explain(upd.error.message, "Could not delete the photo.");
+    if (s.photo_path) await db.storage.from(PHOTO_BUCKET).remove([s.photo_path]);
+    setSetups((all) => (all ?? []).map((x) => (x.id === s.id ? { ...x, photo_path: null } : x)));
+    return null;
+  }
+
   if (setups === null) return null;
   const selected = setups.find((s) => s.id === value) ?? null;
 
@@ -182,8 +247,10 @@ export default function SetupPanel({
       {selected && (
         <div className="mt-3 flex items-center gap-3">
           {selected.photo_path && urls[selected.photo_path] && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={urls[selected.photo_path]} alt={selected.name} className="h-20 w-20 shrink-0 rounded-xl object-cover" />
+            <button type="button" onClick={() => setViewing(true)} aria-label={`View photo of ${selected.name}`} className="shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={urls[selected.photo_path]} alt={selected.name} className="h-20 w-20 rounded-xl object-cover" />
+            </button>
           )}
           <div className="min-w-0 flex-1">
             <p className="text-xs font-bold text-muted">Pin position</p>
@@ -208,6 +275,51 @@ export default function SetupPanel({
             )}
           </div>
         </div>
+      )}
+
+      {selected && (
+        <div className="mt-2">
+          {renaming !== null ? (
+            <div className="flex gap-2">
+              <input
+                autoFocus
+                value={renaming}
+                onChange={(e) => setRenaming(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveName(selected);
+                  if (e.key === "Escape") setRenaming(null);
+                }}
+                aria-label="Setup name"
+                className="h-10 min-w-0 flex-1 rounded-lg border-2 border-accent bg-card px-2 text-base font-semibold outline-none"
+              />
+              <button type="button" onClick={() => saveName(selected)} className="h-10 rounded-lg bg-accent px-3 text-sm font-bold text-on-accent">
+                Save
+              </button>
+              <button type="button" onClick={() => setRenaming(null)} className="h-10 rounded-lg bg-card px-3 text-sm font-bold text-muted">
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="flex gap-4">
+              <button type="button" onClick={() => setRenaming(selected.name)} className="h-9 text-[13px] font-bold text-accent">
+                Rename
+              </button>
+              <button type="button" onClick={() => removeSetup(selected)} className="h-9 text-[13px] font-bold text-red-600">
+                {confirmRemove ? "Tap again to remove" : "Remove setup"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {viewing && selected && selected.photo_path && urls[selected.photo_path] && (
+        <PhotoViewer
+          url={urls[selected.photo_path]}
+          title={selected.name}
+          onClose={() => setViewing(false)}
+          onReplace={(file) => replaceSetupPhoto(selected, file)}
+          onDelete={() => deleteSetupPhoto(selected)}
+        />
       )}
 
       {!adding ? (

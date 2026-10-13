@@ -38,6 +38,7 @@ import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { explain, isOffline, looksLikeNetworkError } from "@/lib/net";
 import { type OutboxSet, type OutboxWorkout, enqueue, flushOutbox, loadOutbox } from "@/lib/outbox";
 import { compressPhoto, uploadPhoto } from "@/lib/photo";
+import PhotoViewer from "./PhotoViewer";
 
 type SetRow = {
   id: string; // generated on the device so a retried save never duplicates a set
@@ -259,6 +260,7 @@ export default function Workout({
   const photoInput = useRef<HTMLInputElement>(null);
   const titleInput = useRef<HTMLInputElement>(null);
   const existingPhotoInput = useRef<HTMLInputElement>(null);
+  const [viewExId, setViewExId] = useState<string | null>(null); // machine whose photo is open full screen
   const photoTarget = useRef<string | null>(null);
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -687,11 +689,8 @@ export default function Workout({
     }
   }
 
-  // Add or replace the photo of a machine that is already in the library.
-  async function onExistingPhoto(file: File | undefined) {
-    const id = photoTarget.current;
-    photoTarget.current = null;
-    if (!file || !id) return;
+  // Save a new photo for a machine in the library. Returns an error message, or null when it worked.
+  async function replaceExercisePhoto(id: string, file: File): Promise<string | null> {
     try {
       const blob = await compressPhoto(file);
       const path = `${userId}/${id}.jpg`;
@@ -702,10 +701,29 @@ export default function Workout({
       setCatalog((all) => all.map((c) => (c.id === id ? { ...c, photo_path: path } : c)));
       const url = up.url;
       if (url) setPhotoUrls((m) => ({ ...m, [path]: url }));
-      setMessage(null);
+      return null;
     } catch (e) {
-      setMessage({ kind: "error", text: explain(e instanceof Error ? e.message : null, "Could not save the photo.") });
+      return explain(e instanceof Error ? e.message : null, "Could not save the photo.");
     }
+  }
+
+  // Take a machine's photo away (the machine stays). Returns an error message, or null when it worked.
+  async function deleteExercisePhoto(id: string): Promise<string | null> {
+    const path = catalog.find((c) => c.id === id)?.photo_path;
+    const upd = await db.from("exercises").update({ photo_path: null }).eq("id", id);
+    if (upd.error) return explain(upd.error.message, "Could not delete the photo.");
+    if (path) await db.storage.from("equipment-photos").remove([path]);
+    setCatalog((all) => all.map((c) => (c.id === id ? { ...c, photo_path: null } : c)));
+    return null;
+  }
+
+  // Add a photo to a machine that has none yet.
+  async function onExistingPhoto(file: File | undefined) {
+    const id = photoTarget.current;
+    photoTarget.current = null;
+    if (!file || !id) return;
+    const err = await replaceExercisePhoto(id, file);
+    setMessage(err ? { kind: "error", text: err } : null);
   }
 
   function choosePhotoFor(exerciseId: string) {
@@ -1144,8 +1162,8 @@ export default function Workout({
             {ex.exerciseId && (
               <button
                 type="button"
-                onClick={() => choosePhotoFor(ex.exerciseId as string)}
-                aria-label={urlFor(ex.exerciseId) ? `Replace photo of ${ex.name}` : `Add a photo of ${ex.name}`}
+                onClick={() => (urlFor(ex.exerciseId) ? setViewExId(ex.exerciseId) : choosePhotoFor(ex.exerciseId as string))}
+                aria-label={urlFor(ex.exerciseId) ? `View photo of ${ex.name}` : `Add a photo of ${ex.name}`}
                 className="shrink-0"
               >
                 {urlFor(ex.exerciseId) ? (
@@ -1516,6 +1534,8 @@ export default function Workout({
           catalog={catalog}
           onCatalogChange={(update) => setCatalog(update)}
           machineUrls={photoUrls}
+          onReplacePhoto={replaceExercisePhoto}
+          onDeletePhoto={deleteExercisePhoto}
           currentGymId={gymId}
           onChange={(update) => setAllGyms(update)}
         />
@@ -1957,6 +1977,15 @@ export default function Workout({
           </svg>
         </button>
       </nav>
+      {viewExId && urlFor(viewExId) && (
+        <PhotoViewer
+          url={urlFor(viewExId) as string}
+          title={catalog.find((c) => c.id === viewExId)?.name ?? "Machine"}
+          onClose={() => setViewExId(null)}
+          onReplace={(file) => replaceExercisePhoto(viewExId, file)}
+          onDelete={() => deleteExercisePhoto(viewExId)}
+        />
+      )}
       <BottomBar
         selected={view === "home" ? "home" : view === "settings" ? null : "train"}
         onSelect={(sec: Section) => {
