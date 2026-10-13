@@ -33,6 +33,7 @@ type Row = {
   duration_s?: number | null;
   distance_m?: number | null;
   rpe?: number | null;
+  superset_id?: string | null;
   completed_at: string | null;
   workout: { name: string; kind?: string | null; started_at: string; gym: { name: string } | { name: string }[] | null } | { name: string; kind?: string | null; started_at: string; gym: { name: string } | { name: string }[] | null }[] | null;
   exercise: { name: string; equipment_type: string } | { name: string; equipment_type: string }[] | null;
@@ -58,6 +59,7 @@ export const CSV_HEADER = [
   "distance_km",
   "distance_mi",
   "effort",
+  "superset_group",
 ];
 
 export function rowToCells(r: Row): Cell[] {
@@ -82,6 +84,7 @@ export function rowToCells(r: Row): Cell[] {
     r.distance_m == null ? null : Number((Number(r.distance_m) / 1000).toFixed(3)),
     r.distance_m == null ? null : Number((Number(r.distance_m) / 1609.344).toFixed(3)),
     r.rpe ?? null,
+    r.superset_id ?? "",
   ];
 }
 
@@ -93,7 +96,7 @@ export async function exportAllSets(db: SupabaseClient): Promise<{ csv: string; 
     const res = await db
       .from("workout_sets")
       .select(
-        "set_index,set_type,weight_kg,reps,duration_s,distance_m,rpe,completed_at,workout:workouts(name,kind,started_at,gym:gyms(name)),exercise:exercises(name,equipment_type),setup:exercise_setups(name,pin_position)",
+        "set_index,set_type,weight_kg,reps,duration_s,distance_m,rpe,superset_id,completed_at,workout:workouts(name,kind,started_at,gym:gyms(name)),exercise:exercises(name,equipment_type),setup:exercise_setups(name,pin_position)",
       )
       .order("completed_at", { ascending: true })
       .order("id", { ascending: true })

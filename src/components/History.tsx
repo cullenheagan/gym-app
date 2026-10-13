@@ -24,6 +24,7 @@ export type RepeatPlan = {
     exerciseId: string;
     name: string;
     setupId: string | null;
+    supersetId?: string | null;
     sets: {
       kg: number | null;
       reps: number | null;
@@ -45,6 +46,7 @@ type RawSet = {
   reps: number | null;
   completed_at: string | null;
   setup_id: string | null;
+  superset_id?: string | null;
   exercise: ExRef | ExRef[] | null;
   setup: SetupRef | SetupRef[] | null;
 };
@@ -105,6 +107,7 @@ export function summarize(w: RawWorkout) {
       name: g.name,
       exerciseId: g.exerciseId,
       setupId: g.sets.find((s) => s.setup_id)?.setup_id ?? null,
+      supersetId: g.sets.find((s) => s.superset_id)?.superset_id ?? null,
       setup,
       sets: g.sets,
       duration,
@@ -131,6 +134,7 @@ export function toPlan(w: RawWorkout, sum: ReturnType<typeof summarize>): Repeat
         exerciseId: ex.exerciseId as string,
         name: ex.name,
         setupId: ex.setupId,
+        supersetId: ex.supersetId,
         sets: ex.sets.map((s) => ({
           kg: s.weight_kg == null ? null : Number(s.weight_kg),
           reps: s.reps == null ? null : Number(s.reps),
@@ -218,7 +222,7 @@ export default function History({
       const res = await db
         .from("workouts")
         .select(
-          "id,name,kind,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,set_type,duration_s,distance_m,rpe,weight_kg,reps,completed_at,setup_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))",
+          "id,name,kind,started_at,ended_at,gym_id,gym:gyms(name),workout_sets(id,set_index,set_type,duration_s,distance_m,rpe,weight_kg,reps,completed_at,setup_id,superset_id,exercise:exercises(id,name),setup:exercise_setups(name,pin_position))",
         )
         .order("started_at", { ascending: false })
         .limit(200);
@@ -416,6 +420,11 @@ export default function History({
                         <p className="text-sm font-bold">
                           <span className="mr-1.5 text-muted">{i + 1}.</span>
                           {ex.name}
+                          {ex.supersetId && sum.exercises.filter((o) => o.supersetId === ex.supersetId).length === 2 && (
+                            <span className="ml-2 rounded-md bg-tint px-1.5 py-0.5 text-[11px] font-extrabold text-accent">
+                              Superset
+                            </span>
+                          )}
                         </p>
                         {ex.duration != null && (
                           <span className="shrink-0 text-[13px] font-semibold text-muted">

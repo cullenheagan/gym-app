@@ -1,5 +1,4 @@
 # Gym app: working notes for Claude
-
 - Next.js 15 + React 19 + Tailwind v4 + Supabase. Deployed on Vercel; every push to `main` redeploys.
 - Commit and push straight to `main`. Write each commit message as a plain-English note on what changed and why.
 - Commits are authored as Cullen Eagan (cullenheagan@gmail.com) with a `Co-Authored-By: Claude` trailer. Set this with `git config user.name/user.email` in the clone.
@@ -10,6 +9,6 @@
 - Weights are stored in kg and converted for display. Look: light/dark tokens in `src/app/globals.css`.
 - Typecheck before pushing (`npx tsc --noEmit`).
 - Planned navigation (approved by Cullen, see `docs/navigation-mockup.png`): a bottom bar with Home and Train now; Nutrition and Coach appear when phases 2 and 4 ship. Train holds the sub-tabs Workout, History, Gyms, Progress. Screen 3 of the mockup ("Later, all phases") is the target Home once nutrition and the coach exist: a Today area with macro bars and a coach tip. Remind Cullen of that mockup when we start phase 2 (macro tracker), phase 3 and phase 4. Bar icons: style C (outline, soft blue fill when selected) is built for Home and Train; confirm Nutrition and Coach icons (leaf, lightning bolt were previewed) when those phases start.
-- Reminder for Cullen (he asked): at the start of the next working session, ask if he wants to build the Superset feature now. He already knows what he wants, so ask him to describe it, and show options before deciding anything about look or layout. Remove this line once it is built.
 - Reminder for Cullen (he asked): at the start of the next working session, also bring up a single-arm variation on the rep tracker (for exercises done one side at a time). Ask how he wants it to work (for example a toggle per exercise, separate left and right reps, or one rep count per side) and show options before deciding anything about look or layout. Check what it means for totals, Est. 1RM, suggestions, Progress, History and the CSV export. Remove this line once it is built.
 - Reminder for Cullen (he asked): at the start of the next working session, also bring up ending a workout at an earlier time, for when he forgets to end it. Ask how he wants to set the end time (for example a time picker on Finish, or "ended at" editable in History) and show options before deciding anything about look or layout. Check that the duration, per-exercise timing, Active time and the activity calendar use the corrected end time (the calendar caps each workout at 4 hours). Remove this line once it is built.
+- Planned (Cullen): tri-sets / giant sets (three or more exercises in one group). Supersets are pairs only for now; they share workout_sets.superset_id and the log screen groups by it, so a larger group can be added later.

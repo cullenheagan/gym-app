@@ -27,6 +27,7 @@ export type OutboxSet = {
   duration_s?: number | null;
   distance_m?: number | null;
   rpe?: number | null;
+  superset_id?: string | null; // sets of two supersetted exercises share this
 };
 
 export type OutboxItem = {

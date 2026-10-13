@@ -64,6 +64,7 @@ type Exercise = {
   prevDate: string | null; // when this exercise was last logged
   setupId?: string | null; // bench / seat setup used (optional; older drafts lack it)
   kind?: Kind; // missing on older drafts, which were all strength
+  supersetId?: string | null; // two exercises sharing this id are a superset (a pair)
   suggestion?: { kg: number; reps: number; hit: boolean; lastKg: number } | null;
   sets: SetRow[];
 };
@@ -94,6 +95,30 @@ type PastSet = {
 };
 
 const newId = () => crypto.randomUUID();
+
+// A new empty set that remembers the last row for its Previous column.
+function blankLike(last: SetRow | undefined, strength: boolean): SetRow {
+  return {
+    id: newId(),
+    prevKg: last?.kg ?? null,
+    prevReps: last?.reps ?? null,
+    kg: strength ? (last?.kg ?? null) : null,
+    reps: null,
+    prevDurationS: strength ? null : (last?.durationS ?? last?.prevDurationS ?? null),
+    prevDistanceM: strength ? null : (last?.distanceM ?? last?.prevDistanceM ?? null),
+    prevRpe: strength ? null : (last?.rpe ?? last?.prevRpe ?? null),
+    done: false,
+    doneAt: null,
+  };
+}
+
+// In a superset round n holds set n of both exercises, so both need the same number of rows.
+function padSets(ex: Exercise, n: number): Exercise {
+  if (ex.sets.length >= n) return ex;
+  const sets = [...ex.sets];
+  while (sets.length < n) sets.push(blankLike(sets[sets.length - 1], kindOf(ex.kind) === "strength"));
+  return { ...ex, sets };
+}
 
 function Thumb({ url, size = 40 }: { url?: string; size?: number }) {
   if (!url) return null;
@@ -225,6 +250,7 @@ export default function Workout({
   const [gymUrls, setGymUrls] = useState<Record<string, string>>({});
   const [newGym, setNewGym] = useState("");
   const [picking, setPicking] = useState(false);
+  const [supersetFor, setSupersetFor] = useState<string | null>(null); // key of the exercise the picker is choosing a partner for
   const [query, setQuery] = useState("");
   const [newType, setNewType] = useState<string>("free_weight");
   const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
@@ -634,6 +660,7 @@ export default function Workout({
 
   function closePicker() {
     setPicking(false);
+    setSupersetFor(null);
     setQuery("");
     clearPhoto();
   }
@@ -681,13 +708,21 @@ export default function Workout({
     if (exercises.length > 0 && !window.confirm("This replaces the workout you are logging right now. Continue?")) {
       return;
     }
-    const copied: Exercise[] = plan.exercises.map((p) => ({
+    // Rebuild superset pairs exactly: only a pair of two exercises sharing an id counts.
+    const pairCount = new Map<string, number>();
+    for (const p of plan.exercises) if (p.supersetId) pairCount.set(p.supersetId, (pairCount.get(p.supersetId) ?? 0) + 1);
+    const newPairId = new Map<string, string>();
+    const copiedRaw: Exercise[] = plan.exercises.map((p) => ({
       key: newId(),
       name: p.name,
       exerciseId: p.exerciseId,
       prevDate: plan.startedAt,
       setupId: p.setupId,
       kind: kindOf(plan.kind),
+      supersetId:
+        p.supersetId && pairCount.get(p.supersetId) === 2
+          ? (newPairId.get(p.supersetId) ?? (newPairId.set(p.supersetId, newId()), newPairId.get(p.supersetId)!))
+          : null,
       suggestion:
         kindOf(plan.kind) === "strength"
           ? suggest(
@@ -712,6 +747,21 @@ export default function Workout({
         rpe: kindOf(plan.kind) === "strength" ? null : (s.rpe ?? null),
       })),
     }));
+    // Put each partner right after its first half and give both the same number of rounds.
+    const copied: Exercise[] = [];
+    const placed = new Set<Exercise>();
+    for (const ex of copiedRaw) {
+      if (placed.has(ex)) continue;
+      placed.add(ex);
+      const mate = ex.supersetId ? copiedRaw.find((o) => o !== ex && o.supersetId === ex.supersetId) : undefined;
+      if (!mate) {
+        copied.push(ex);
+        continue;
+      }
+      placed.add(mate);
+      const rounds = Math.max(ex.sets.length, mate.sets.length);
+      copied.push(padSets(ex, rounds), padSets(mate, rounds));
+    }
     setTitle(plan.name);
     setWorkoutKind(kindOf(plan.kind));
     if (plan.gymId && gyms.some((g) => g.id === plan.gymId)) setGymId(plan.gymId);
@@ -778,10 +828,34 @@ export default function Workout({
             stepKg(unit),
           )
         : null;
-    setExercises((all) => [
-      ...all,
-      { key: newId(), name: c.name, exerciseId: c.id, prevDate, setupId, kind, suggestion: sg, sets },
-    ]);
+    const added: Exercise = { key: newId(), name: c.name, exerciseId: c.id, prevDate, setupId, kind, suggestion: sg, sets };
+    const partnerKey = supersetFor;
+    setExercises((all) => {
+      const at = partnerKey ? all.findIndex((e) => e.key === partnerKey) : -1;
+      if (at < 0) return [...all, added];
+      // Pair it with the exercise it was picked for and put it right after, with matching rounds.
+      const id = all[at].supersetId ?? newId();
+      const rounds = Math.max(all[at].sets.length, added.sets.length);
+      const first = padSets({ ...all[at], supersetId: id }, rounds);
+      const second = padSets({ ...added, supersetId: id }, rounds);
+      return [...all.slice(0, at), first, second, ...all.slice(at + 1)];
+    });
+    setSupersetFor(null);
+  }
+
+  // The Superset? button: choose the second exercise from the picker.
+  function startSuperset(exKey: string) {
+    setSupersetFor(exKey);
+    setPicking(true);
+    setMessage(null);
+  }
+
+  // Break a superset back into two normal exercises (nothing is deleted).
+  function unlinkSuperset(exKey: string) {
+    setExercises((all) => {
+      const id = all.find((e) => e.key === exKey)?.supersetId;
+      return id ? all.map((e) => (e.supersetId === id ? { ...e, supersetId: null } : e)) : all;
+    });
   }
 
   async function pickExercise(c: Catalog) {
@@ -888,37 +962,39 @@ export default function Workout({
     );
   }
 
+  // In a superset a new set is a new round: it is added to both exercises.
   function addSet(exKey: string) {
-    setExercises((all) =>
-      all.map((ex) => {
-        if (ex.key !== exKey) return ex;
-        const last = ex.sets[ex.sets.length - 1];
-        const strength = kindOf(ex.kind) === "strength";
-        const next: SetRow = {
-          id: newId(),
-          prevKg: last?.kg ?? null,
-          prevReps: last?.reps ?? null,
-          kg: strength ? (last?.kg ?? null) : null,
-          reps: null,
-          prevDurationS: strength ? null : (last?.durationS ?? last?.prevDurationS ?? null),
-          prevDistanceM: strength ? null : (last?.distanceM ?? last?.prevDistanceM ?? null),
-          prevRpe: strength ? null : (last?.rpe ?? last?.prevRpe ?? null),
-          done: false,
-          doneAt: null,
-        };
+    setExercises((all) => {
+      const id = all.find((e) => e.key === exKey)?.supersetId;
+      return all.map((ex) => {
+        const inPair = id ? ex.supersetId === id : false;
+        if (ex.key !== exKey && !inPair) return ex;
+        const next = blankLike(ex.sets[ex.sets.length - 1], kindOf(ex.kind) === "strength");
         return { ...ex, sets: [...ex.sets, next] };
-      }),
-    );
+      });
+    });
   }
 
+  // In a superset, removing a set removes that round from both exercises.
   function removeSet(exKey: string, setId: string) {
-    setExercises((all) =>
-      all.map((ex) => (ex.key !== exKey ? ex : { ...ex, sets: ex.sets.filter((s) => s.id !== setId) })),
-    );
+    setExercises((all) => {
+      const me = all.find((e) => e.key === exKey);
+      const idx = me ? me.sets.findIndex((s) => s.id === setId) : -1;
+      const id = me?.supersetId;
+      return all.map((ex) => {
+        if (ex.key === exKey) return { ...ex, sets: ex.sets.filter((s) => s.id !== setId) };
+        if (id && ex.supersetId === id && idx >= 0) return { ...ex, sets: ex.sets.filter((_, k) => k !== idx) };
+        return ex;
+      });
+    });
   }
 
+  // Removing one half of a superset leaves the other as a normal exercise.
   function removeExercise(exKey: string) {
-    setExercises((all) => all.filter((ex) => ex.key !== exKey));
+    setExercises((all) => {
+      const id = all.find((e) => e.key === exKey)?.supersetId;
+      return all.filter((ex) => ex.key !== exKey).map((ex) => (id && ex.supersetId === id ? { ...ex, supersetId: null } : ex));
+    });
   }
 
   function discardWorkout() {
@@ -980,6 +1056,10 @@ export default function Workout({
       ended_at: finishedAt,
       kind: workoutKind,
     };
+    // Only keep the superset link when both exercises actually have sets to save.
+    const pairedIds = new Set(
+      withDone.filter((ex) => ex.supersetId && withDone.filter((o) => o.supersetId === ex.supersetId).length === 2).map((ex) => ex.supersetId as string),
+    );
     const sets: OutboxSet[] = withDone.flatMap((ex) =>
       ex.sets
         .filter((s) => s.done)
@@ -997,6 +1077,7 @@ export default function Workout({
           rpe: s.rpe ?? null,
           completed_at: s.doneAt ?? finishedAt,
           setup_id: ex.setupId ?? null,
+          superset_id: ex.supersetId && pairedIds.has(ex.supersetId) ? ex.supersetId : null,
         })),
     );
 
@@ -1041,6 +1122,227 @@ export default function Workout({
   const totalMeters = doneSets.reduce((sum, s) => sum + (s.distanceM ?? 0), 0);
   const effortSets = doneSets.filter((s) => s.rpe != null);
   const avgEffort = effortSets.length ? effortSets.reduce((sum, s) => sum + (s.rpe ?? 0), 0) / effortSets.length : null;
+  // A superset is two exercises that share a supersetId; the partner is the other one.
+  const partnerOf = (ex: Exercise): Exercise | null =>
+    ex.supersetId ? (exercises.find((o) => o.key !== ex.key && o.supersetId === ex.supersetId) ?? null) : null;
+
+  const exHeader = (ex: Exercise, tag?: string) => (
+    <>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            {ex.exerciseId && (
+              <button
+                type="button"
+                onClick={() => choosePhotoFor(ex.exerciseId as string)}
+                aria-label={urlFor(ex.exerciseId) ? `Replace photo of ${ex.name}` : `Add a photo of ${ex.name}`}
+                className="shrink-0"
+              >
+                {urlFor(ex.exerciseId) ? (
+                  <Thumb url={urlFor(ex.exerciseId)} size={44} />
+                ) : (
+                  <span className="flex h-11 w-11 items-center justify-center rounded-lg border-2 border-dashed border-line text-muted">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M4 8h3l2-3h6l2 3h3v11H4z" />
+                      <circle cx="12" cy="13" r="3.5" />
+                    </svg>
+                  </span>
+                )}
+              </button>
+            )}
+            {tag && (
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-tint text-xs font-extrabold text-accent">
+                {tag}
+              </span>
+            )}
+            <h2 className="text-[19px] font-extrabold leading-tight tracking-tight">{ex.name}</h2>
+          </div>
+          {ex.prevDate && (
+            <p className="mt-0.5 text-[13px] font-medium text-muted">Last time: {formatDate(ex.prevDate)}</p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => removeExercise(ex.key)}
+          aria-label={`Remove ${ex.name}`}
+          className="-mr-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted hover:text-ink"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+
+      {ex.exerciseId && (
+        <SetupPanel
+          db={db}
+          userId={userId}
+          exerciseId={ex.exerciseId}
+          gymId={gymId}
+          value={ex.setupId ?? null}
+          onChange={(id) => setSetup(ex.key, id)}
+        />
+      )}
+
+      {!tag && kindOf(ex.kind) === "strength" && (
+        <button
+          type="button"
+          onClick={() => startSuperset(ex.key)}
+          className="mt-3 h-9 rounded-[10px] border-2 border-dashed border-accent px-3 text-xs font-extrabold text-accent"
+        >
+          Superset?
+        </button>
+      )}
+
+      {ex.suggestion && ex.sets.some((x) => !x.done && !x.warmup) && (
+        <button
+          type="button"
+          onClick={() => applySuggestion(ex.key)}
+          className="mt-3 w-full rounded-[14px] bg-tint px-4 py-2.5 text-left"
+        >
+          <span className="block text-sm font-extrabold text-accent">
+            Try {formatWeight(ex.suggestion.kg, unit)} {unit} × {ex.suggestion.reps}
+          </span>
+          <span className="block text-xs text-muted">
+            {ex.suggestion.hit
+              ? `You hit your reps at ${formatWeight(ex.suggestion.lastKg, unit)} ${unit} last time. Tap to fill your sets.`
+              : `Some sets fell short at ${formatWeight(ex.suggestion.lastKg, unit)} ${unit} last time, so stay here. Tap to fill your sets.`}
+          </span>
+        </button>
+      )}
+    </>
+  );
+
+  const setRow = (ex: Exercise, s: SetRow, i: number, suffix: string) => {
+    const num = ex.sets.slice(0, i + 1).filter((x) => !x.warmup).length;
+    return (
+    <div
+      key={s.id}
+      className={`mt-1.5 grid ${suffix ? "grid-cols-[36px_1fr_1fr_1fr_44px_36px]" : "grid-cols-[28px_1fr_1fr_1fr_44px_36px]"} items-center gap-2 ${
+        s.warmup ? "rounded-xl bg-tint" : ""
+      }`}
+    >
+      {kindOf(ex.kind) !== "strength" ? (
+        <span className={`flex h-8 items-center justify-center rounded-full bg-field text-base font-bold ${suffix ? "w-9" : "w-7"}`}>
+          {i + 1}{suffix}
+        </span>
+      ) : (
+      <button
+        type="button"
+        onClick={() => toggleWarmup(ex.key, s.id, !s.warmup)}
+        aria-label={
+          s.warmup
+            ? "Warm-up set. Tap to make it a working set"
+            : `Working set ${num}${suffix}. Tap to make it a warm-up`
+        }
+        className={`h-8 rounded-full text-base font-bold ${suffix ? "w-9" : "w-7"} ${s.warmup ? "bg-accent text-on-accent" : "bg-field"}`}
+      >
+        {s.warmup ? "W" : `${num}${suffix}`}
+      </button>
+      )}
+      <span className="text-sm font-medium text-muted">
+        {kindOf(ex.kind) !== "strength"
+          ? describeSet(
+              kindOf(ex.kind),
+              {
+                kg: null,
+                reps: null,
+                durationS: s.prevDurationS ?? null,
+                distanceM: s.prevDistanceM ?? null,
+                rpe: s.prevRpe ?? null,
+              },
+              unit,
+              String,
+            )
+          : !s.warmup && s.prevKg != null && s.prevReps != null
+            ? `${formatWeight(s.prevKg, unit)} × ${s.prevReps}`
+            : "-"}
+      </span>
+      {kindOf(ex.kind) === "strength" ? (
+        <>
+          <NumField
+            ariaLabel={`Weight in ${unit}, set ${i + 1}`}
+            value={s.kg == null ? null : toDisplay(s.kg, unit)}
+            onChange={(v) => updateSet(ex.key, s.id, { kg: v == null ? null : fromDisplay(v, unit) })}
+          />
+          <NumField
+            ariaLabel={`Reps, set ${i + 1} (decimals like 8.5 allowed)`}
+            max={999}
+            value={s.reps ?? null}
+            onChange={(v) => updateSet(ex.key, s.id, { reps: v == null ? null : Math.round(v * 100) / 100 })}
+          />
+        </>
+      ) : kindOf(ex.kind) === "intervals" ? (
+        <>
+          <NumField
+            integer
+            ariaLabel={`Seconds, round ${i + 1}`}
+            value={s.durationS ?? null}
+            onChange={(v) => updateSet(ex.key, s.id, { durationS: v })}
+          />
+          <NumField
+            integer
+            ariaLabel={`Reps, round ${i + 1} (optional)`}
+            value={s.reps ?? null}
+            onChange={(v) => updateSet(ex.key, s.id, { reps: v })}
+          />
+        </>
+      ) : (
+        <>
+          <NumField
+            ariaLabel={`Minutes, entry ${i + 1}`}
+            value={s.durationS == null ? null : secToMin(s.durationS)}
+            onChange={(v) => updateSet(ex.key, s.id, { durationS: v == null ? null : minToSec(v) })}
+          />
+          {kindOf(ex.kind) === "cardio" ? (
+            <NumField
+              ariaLabel={`Distance in ${distUnit(unit)}, entry ${i + 1}`}
+              value={s.distanceM == null ? null : distToDisplay(s.distanceM, unit)}
+              onChange={(v) =>
+                updateSet(ex.key, s.id, { distanceM: v == null ? null : distFromDisplay(v, unit) })
+              }
+            />
+          ) : (
+            <NumField
+              integer
+              max={10}
+              ariaLabel={`Effort 1 to 10, entry ${i + 1}`}
+              value={s.rpe ?? null}
+              onChange={(v) => updateSet(ex.key, s.id, { rpe: v })}
+            />
+          )}
+        </>
+      )}
+      <button
+        type="button"
+        aria-label={`Set ${i + 1} ${s.done ? "done, tap to undo" : "mark done"}`}
+        aria-pressed={s.done}
+        onClick={() =>
+          updateSet(ex.key, s.id, {
+            done: !s.done,
+            doneAt: s.done ? null : new Date().toISOString(),
+          })
+        }
+        className={`flex h-11 w-11 items-center justify-center rounded-full ${
+          s.done ? "bg-done text-on-accent" : "bg-field text-muted"
+        }`}
+      >
+        <CheckIcon />
+      </button>
+      <button
+        type="button"
+        aria-label={`Remove set ${i + 1}`}
+        onClick={() => removeSet(ex.key, s.id)}
+        className="flex h-11 w-9 items-center justify-center rounded-lg text-muted hover:text-ink"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </div>
+    );
+  };
+
   const setWord = (n: number) =>
     workoutKind === "strength" ? (n === 1 ? "set" : "sets") : workoutKind === "intervals" ? (n === 1 ? "round" : "rounds") : n === 1 ? "entry" : "entries";
   const headline: { label: string; value: string; unit: string } =
@@ -1350,7 +1652,7 @@ export default function Workout({
         {picking && (
           <section className="rounded-[20px] bg-card p-4 shadow-sm" aria-label="Add exercise">
             <label htmlFor="exercise-search" className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-muted">
-              Add exercise{gymName ? ` · ${gymName}` : ""}
+              {supersetFor ? `Superset with ${exercises.find((e) => e.key === supersetFor)?.name ?? "this exercise"} · pick the second exercise` : `Add exercise${gymName ? ` · ${gymName}` : ""}`}
             </label>
             <div className="flex gap-2">
               <input
@@ -1485,75 +1787,50 @@ export default function Workout({
           </section>
         )}
 
-        {exercises.map((ex) => (
-          <section key={ex.key} className="rounded-[20px] bg-card p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="flex items-center gap-3">
-                  {ex.exerciseId && (
-                    <button
-                      type="button"
-                      onClick={() => choosePhotoFor(ex.exerciseId as string)}
-                      aria-label={urlFor(ex.exerciseId) ? `Replace photo of ${ex.name}` : `Add a photo of ${ex.name}`}
-                      className="shrink-0"
-                    >
-                      {urlFor(ex.exerciseId) ? (
-                        <Thumb url={urlFor(ex.exerciseId)} size={44} />
-                      ) : (
-                        <span className="flex h-11 w-11 items-center justify-center rounded-lg border-2 border-dashed border-line text-muted">
-                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M4 8h3l2-3h6l2 3h3v11H4z" />
-                            <circle cx="12" cy="13" r="3.5" />
-                          </svg>
-                        </span>
-                      )}
-                    </button>
-                  )}
-                  <h2 className="text-[19px] font-extrabold leading-tight tracking-tight">{ex.name}</h2>
+        {exercises.map((ex) => {
+          const partner = partnerOf(ex);
+          if (partner && exercises.indexOf(partner) < exercises.indexOf(ex)) return null; // shown inside its partner's card
+          if (partner) {
+            const rounds = Math.max(ex.sets.length, partner.sets.length);
+            return (
+              <section key={ex.key} className="rounded-[20px] border-l-[5px] border-accent bg-card p-4 shadow-sm">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="rounded-lg bg-accent px-2 py-0.5 text-[11px] font-extrabold tracking-wider text-on-accent">
+                    SUPERSET
+                  </span>
+                  <button type="button" onClick={() => unlinkSuperset(ex.key)} className="h-8 px-1 text-xs font-bold text-muted">
+                    Unlink
+                  </button>
                 </div>
-                {ex.prevDate && (
-                  <p className="mt-0.5 text-[13px] font-medium text-muted">Last time: {formatDate(ex.prevDate)}</p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => removeExercise(ex.key)}
-                aria-label={`Remove ${ex.name}`}
-                className="-mr-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted hover:text-ink"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </button>
-            </div>
-
-            {ex.exerciseId && (
-              <SetupPanel
-                db={db}
-                userId={userId}
-                exerciseId={ex.exerciseId}
-                gymId={gymId}
-                value={ex.setupId ?? null}
-                onChange={(id) => setSetup(ex.key, id)}
-              />
-            )}
-
-            {ex.suggestion && ex.sets.some((x) => !x.done && !x.warmup) && (
-              <button
-                type="button"
-                onClick={() => applySuggestion(ex.key)}
-                className="mt-3 w-full rounded-[14px] bg-tint px-4 py-2.5 text-left"
-              >
-                <span className="block text-sm font-extrabold text-accent">
-                  Try {formatWeight(ex.suggestion.kg, unit)} {unit} × {ex.suggestion.reps}
-                </span>
-                <span className="block text-xs text-muted">
-                  {ex.suggestion.hit
-                    ? `You hit your reps at ${formatWeight(ex.suggestion.lastKg, unit)} ${unit} last time. Tap to fill your sets.`
-                    : `Some sets fell short at ${formatWeight(ex.suggestion.lastKg, unit)} ${unit} last time, so stay here. Tap to fill your sets.`}
-                </span>
-              </button>
-            )}
+                {exHeader(ex, "A")}
+                <div className="mt-4 border-t border-line pt-3">{exHeader(partner, "B")}</div>
+                <div className="mt-2">
+                  <div className="grid grid-cols-[36px_1fr_1fr_1fr_44px_36px] gap-2 px-0.5 text-xs font-bold text-muted">
+                    <span>Set</span>
+                    <span>Previous</span>
+                    <span className="text-center">{unit}</span>
+                    <span className="text-center">Reps</span>
+                    <span />
+                    <span />
+                  </div>
+                  {Array.from({ length: rounds }).flatMap((_, n) => [
+                    ex.sets[n] ? setRow(ex, ex.sets[n], n, "a") : null,
+                    partner.sets[n] ? setRow(partner, partner.sets[n], n, "b") : null,
+                  ])}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => addSet(ex.key)}
+                  className="mt-3 h-11 w-full rounded-[14px] bg-tint text-sm font-bold text-accent"
+                >
+                  Add set
+                </button>
+              </section>
+            );
+          }
+          return (
+          <section key={ex.key} className="rounded-[20px] bg-card p-4 shadow-sm">
+            {exHeader(ex)}
 
             {ex.sets.length > 0 && (
               <div className="mt-2">
@@ -1580,135 +1857,7 @@ export default function Workout({
                   <span />
                   <span />
                 </div>
-                {ex.sets.map((s, i) => {
-                  const num = ex.sets.slice(0, i + 1).filter((x) => !x.warmup).length;
-                  return (
-                  <div
-                    key={s.id}
-                    className={`mt-1.5 grid grid-cols-[28px_1fr_1fr_1fr_44px_36px] items-center gap-2 ${
-                      s.warmup ? "rounded-xl bg-tint" : ""
-                    }`}
-                  >
-                    {kindOf(ex.kind) !== "strength" ? (
-                      <span className="flex h-8 w-7 items-center justify-center rounded-full bg-field text-base font-bold">
-                        {i + 1}
-                      </span>
-                    ) : (
-                    <button
-                      type="button"
-                      onClick={() => toggleWarmup(ex.key, s.id, !s.warmup)}
-                      aria-label={
-                        s.warmup
-                          ? "Warm-up set. Tap to make it a working set"
-                          : `Working set ${num}. Tap to make it a warm-up`
-                      }
-                      className={`h-8 w-7 rounded-full text-base font-bold ${s.warmup ? "bg-accent text-on-accent" : "bg-field"}`}
-                    >
-                      {s.warmup ? "W" : num}
-                    </button>
-                    )}
-                    <span className="text-sm font-medium text-muted">
-                      {kindOf(ex.kind) !== "strength"
-                        ? describeSet(
-                            kindOf(ex.kind),
-                            {
-                              kg: null,
-                              reps: null,
-                              durationS: s.prevDurationS ?? null,
-                              distanceM: s.prevDistanceM ?? null,
-                              rpe: s.prevRpe ?? null,
-                            },
-                            unit,
-                            String,
-                          )
-                        : !s.warmup && s.prevKg != null && s.prevReps != null
-                          ? `${formatWeight(s.prevKg, unit)} × ${s.prevReps}`
-                          : "-"}
-                    </span>
-                    {kindOf(ex.kind) === "strength" ? (
-                      <>
-                        <NumField
-                          ariaLabel={`Weight in ${unit}, set ${i + 1}`}
-                          value={s.kg == null ? null : toDisplay(s.kg, unit)}
-                          onChange={(v) => updateSet(ex.key, s.id, { kg: v == null ? null : fromDisplay(v, unit) })}
-                        />
-                        <NumField
-                          ariaLabel={`Reps, set ${i + 1} (decimals like 8.5 allowed)`}
-                          max={999}
-                          value={s.reps ?? null}
-                          onChange={(v) => updateSet(ex.key, s.id, { reps: v == null ? null : Math.round(v * 100) / 100 })}
-                        />
-                      </>
-                    ) : kindOf(ex.kind) === "intervals" ? (
-                      <>
-                        <NumField
-                          integer
-                          ariaLabel={`Seconds, round ${i + 1}`}
-                          value={s.durationS ?? null}
-                          onChange={(v) => updateSet(ex.key, s.id, { durationS: v })}
-                        />
-                        <NumField
-                          integer
-                          ariaLabel={`Reps, round ${i + 1} (optional)`}
-                          value={s.reps ?? null}
-                          onChange={(v) => updateSet(ex.key, s.id, { reps: v })}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <NumField
-                          ariaLabel={`Minutes, entry ${i + 1}`}
-                          value={s.durationS == null ? null : secToMin(s.durationS)}
-                          onChange={(v) => updateSet(ex.key, s.id, { durationS: v == null ? null : minToSec(v) })}
-                        />
-                        {kindOf(ex.kind) === "cardio" ? (
-                          <NumField
-                            ariaLabel={`Distance in ${distUnit(unit)}, entry ${i + 1}`}
-                            value={s.distanceM == null ? null : distToDisplay(s.distanceM, unit)}
-                            onChange={(v) =>
-                              updateSet(ex.key, s.id, { distanceM: v == null ? null : distFromDisplay(v, unit) })
-                            }
-                          />
-                        ) : (
-                          <NumField
-                            integer
-                            max={10}
-                            ariaLabel={`Effort 1 to 10, entry ${i + 1}`}
-                            value={s.rpe ?? null}
-                            onChange={(v) => updateSet(ex.key, s.id, { rpe: v })}
-                          />
-                        )}
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      aria-label={`Set ${i + 1} ${s.done ? "done, tap to undo" : "mark done"}`}
-                      aria-pressed={s.done}
-                      onClick={() =>
-                        updateSet(ex.key, s.id, {
-                          done: !s.done,
-                          doneAt: s.done ? null : new Date().toISOString(),
-                        })
-                      }
-                      className={`flex h-11 w-11 items-center justify-center rounded-full ${
-                        s.done ? "bg-done text-on-accent" : "bg-field text-muted"
-                      }`}
-                    >
-                      <CheckIcon />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Remove set ${i + 1}`}
-                      onClick={() => removeSet(ex.key, s.id)}
-                      className="flex h-11 w-9 items-center justify-center rounded-lg text-muted hover:text-ink"
-                    >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M6 6l12 12M18 6L6 18" />
-                      </svg>
-                    </button>
-                  </div>
-                  );
-                })}
+                {ex.sets.map((s, i) => setRow(ex, s, i, ""))}
               </div>
             )}
 
@@ -1720,7 +1869,8 @@ export default function Workout({
               {kindOf(ex.kind) === "strength" ? "Add set" : kindOf(ex.kind) === "intervals" ? "Add round" : "Add entry"}
             </button>
           </section>
-        ))}
+          );
+        })}
 
         {message && (
           <p
