@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import NumField from "./NumField";
+import Scanner from "./Scanner";
 import { explain } from "@/lib/net";
 import { type AmountUnit, type FoodEntry, type FoodHit, macrosFor, round1 } from "@/lib/nutrition";
 import { type FoodItem, type MyFoods, type SavedMeal, insertSavedFood, sameFood, sumItems } from "@/lib/saved-foods";
@@ -49,6 +50,10 @@ export default function AddFood({
   const [manage, setManage] = useState(false);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
 
+  const [scanning, setScanning] = useState(false);
+  const [looking, setLooking] = useState(false);
+  const [notFound, setNotFound] = useState<string | null>(null); // a barcode the databases do not know
+
   const latest = useRef(0);
 
   useEffect(() => {
@@ -94,6 +99,26 @@ export default function AddFood({
     }, 450);
     return () => window.clearTimeout(t);
   }, [query, tab, db]);
+
+  async function lookupCode(code: string) {
+    setScanning(false);
+    setLooking(true);
+    setNotFound(null);
+    setSearchErr(null);
+    try {
+      const session = await db.auth.getSession();
+      const token = session.data.session?.access_token ?? "";
+      const res = await fetch(`/api/foods/search?code=${encodeURIComponent(code)}`, { headers: { Authorization: `Bearer ${token}` } });
+      const body = (await res.json()) as { foods?: FoodHit[]; error?: string };
+      if (!res.ok) setSearchErr(body.error ?? "Lookup failed. Try again.");
+      else if (body.foods && body.foods[0]) pick(body.foods[0]);
+      else setNotFound(code);
+    } catch {
+      setSearchErr(explain("Failed to fetch", "Lookup failed. Try again."));
+    } finally {
+      setLooking(false);
+    }
+  }
 
   function pick(h: FoodHit) {
     setHit(h);
@@ -239,14 +264,46 @@ export default function AddFood({
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
           {tab === "search" && !hit && (
             <>
-              <input
-                autoFocus
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search foods, like chicken breast"
-                aria-label="Search foods"
-                className="h-11 w-full rounded-[14px] bg-field px-4 text-base outline-none"
-              />
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setNotFound(null);
+                  }}
+                  placeholder="Search foods, like chicken breast"
+                  aria-label="Search foods"
+                  className="h-11 min-w-0 flex-1 rounded-[14px] bg-field px-4 text-base outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setScanning(true)}
+                  aria-label="Scan a barcode"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] bg-tint text-accent"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 8v8M12 8v8M16 8v8" />
+                  </svg>
+                </button>
+              </div>
+              {looking && <p className="mt-3 text-sm font-medium text-muted">Looking up the barcode...</p>}
+              {notFound && (
+                <div className="mt-3 rounded-[14px] bg-field p-3">
+                  <p className="text-sm font-bold">Barcode {notFound} was not found.</p>
+                  <p className="mt-0.5 text-xs font-medium text-muted">Type the numbers from the label once, and tick Also save to My foods to keep it.</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNotFound(null);
+                      setTab("manual");
+                    }}
+                    className="mt-2 h-10 rounded-[12px] bg-accent px-4 text-sm font-bold text-on-accent"
+                  >
+                    Type it in
+                  </button>
+                </div>
+              )}
               {searching && <p className="mt-3 text-sm font-medium text-muted">Searching...</p>}
               {searchErr && (
                 <p role="alert" className="mt-3 text-sm font-semibold text-red-600">
@@ -443,6 +500,16 @@ export default function AddFood({
             </p>
           )}
         </div>
+        {scanning && (
+          <Scanner
+            onCode={lookupCode}
+            onClose={() => setScanning(false)}
+            onTypeIt={() => {
+              setScanning(false);
+              setTab("manual");
+            }}
+          />
+        )}
       </div>
     </div>
   );

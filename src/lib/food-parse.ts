@@ -60,6 +60,7 @@ type UsdaFood = {
   servingSize?: number;
   servingSizeUnit?: string;
   householdServingFullText?: string;
+  gtinUpc?: string;
   foodNutrients?: { nutrientId?: number; nutrientNumber?: string | number; value?: number }[];
 };
 
@@ -73,11 +74,13 @@ const readable = (s: string) => {
 
 // Search results give nutrients per 100 g. `generic` is true for Foundation and SR Legacy foods
 // (plain chicken, rice, eggs), false for branded packages.
-export function parseUsda(foods: unknown): (FoodHit & { generic: boolean })[] {
+export function parseUsda(foods: unknown, onlyGtin?: string): (FoodHit & { generic: boolean })[] {
   if (!Array.isArray(foods)) return [];
   const out: (FoodHit & { generic: boolean })[] = [];
   const seen = new Set<string>();
+  const stripZeros = (v: string) => v.replace(/^0+/, "");
   for (const raw of foods as UsdaFood[]) {
+    if (onlyGtin && stripZeros(String(raw.gtinUpc ?? "")) !== stripZeros(onlyGtin)) continue;
     const name = readable(raw.description ?? "");
     const by: Record<string, number> = {};
     for (const fn of raw.foodNutrients ?? []) {

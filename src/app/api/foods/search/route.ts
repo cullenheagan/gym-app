@@ -17,7 +17,23 @@ export async function GET(req: Request) {
   const who = await createClient(url, key).auth.getUser(token);
   if (who.error || !who.data.user) return NextResponse.json({ error: "Sign in to search foods." }, { status: 401 });
 
-  const q = (new URL(req.url).searchParams.get("q") ?? "").trim().slice(0, 80);
+  const params = new URL(req.url).searchParams;
+
+  // Barcode lookup: one product by its number.
+  const code = (params.get("code") ?? "").trim();
+  if (code) {
+    if (!/^\d{8,14}$/.test(code)) return NextResponse.json({ error: "That does not look like a barcode number." }, { status: 400 });
+    const [off, usda] = await Promise.all([lookupOff(code), lookupUsda(code)]);
+    if (off === null && usda === null) return NextResponse.json({ error: "The food database did not answer. Try again." }, { status: 502 });
+    const found = [...(off ?? []), ...(usda ?? [])].slice(0, 1).map((h) => {
+      const { ...hit } = h as FoodHit & { generic?: boolean };
+      delete hit.generic;
+      return hit;
+    });
+    return NextResponse.json({ foods: found });
+  }
+
+  const q = (params.get("q") ?? "").trim().slice(0, 80);
   if (q.length < 2) return NextResponse.json({ foods: [] });
 
   const [off, usda] = await Promise.all([searchOff(q), searchUsda(q)]);
@@ -80,4 +96,29 @@ async function searchUsda(q: string): Promise<(FoodHit & { generic: boolean })[]
     foods?: unknown;
   } | null;
   return body ? parseUsda(body.foods) : null;
+}
+
+// Barcode lookups. Open Food Facts is asked first (it knows most packaged foods), then USDA's
+// branded foods, which are matched on the exact barcode.
+async function lookupOff(code: string): Promise<FoodHit[] | null> {
+  const u = new URL(`https://world.openfoodfacts.org/api/v2/product/${code}.json`);
+  u.searchParams.set("fields", "code,product_name,generic_name,brands,serving_size,serving_quantity,nutriments");
+  const body = (await timed((signal) =>
+    fetch(u, { signal, headers: { "User-Agent": "GymCompanion/1.0 (personal project)", Accept: "application/json" }, cache: "no-store" }),
+  )) as { status?: number; product?: Record<string, unknown> } | null;
+  if (!body) return null;
+  return body.status === 1 && body.product ? parseOff([{ code, ...body.product }]) : [];
+}
+
+async function lookupUsda(code: string): Promise<(FoodHit & { generic: boolean })[] | null> {
+  const key = process.env.USDA_API_KEY;
+  if (!key) return null;
+  const u = new URL("https://api.nal.usda.gov/fdc/v1/foods/search");
+  u.searchParams.set("query", code);
+  u.searchParams.set("pageSize", "10");
+  u.searchParams.set("dataType", "Branded");
+  const body = (await timed((signal) => fetch(u, { signal, headers: { "X-Api-Key": key, Accept: "application/json" }, cache: "no-store" }))) as {
+    foods?: unknown;
+  } | null;
+  return body ? parseUsda(body.foods, code) : null;
 }
