@@ -31,6 +31,7 @@ import Settings, { type ThemeChoice } from "./Settings";
 import Avatar from "./Avatar";
 import { avatarKey, avatarPath, clearPending, compressAvatar, dataUrlToBlob, takePending } from "@/lib/avatar";
 import Progress from "./Progress";
+import Nutrition from "./Nutrition";
 import History, { type RepeatPlan } from "./History";
 import SetupPanel from "./SetupPanel";
 import Gyms from "./Gyms";
@@ -274,7 +275,7 @@ export default function Workout({
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  const [view, setView] = useState<"home" | "log" | "history" | "gyms" | "progress" | "settings">("home");
+  const [view, setView] = useState<"home" | "log" | "history" | "gyms" | "progress" | "settings" | "nutrition">("home");
   const [displayName, setDisplayName] = useState(() => {
     try {
       return localStorage.getItem(`name:${userId}`) ?? "";
@@ -1620,11 +1621,14 @@ export default function Workout({
           onStart={startWorkout}
           onResume={() => setView("log")}
           onTemplate={repeatWorkout}
+          onOpenNutrition={() => setView("nutrition")}
         />
       )}
 
       {view === "settings" && (
         <Settings
+          db={db}
+          userId={userId}
           email={email}
           name={displayName}
           avatar={avatar}
@@ -1637,6 +1641,8 @@ export default function Workout({
           onSignOut={handleSignOut}
         />
       )}
+
+      {view === "nutrition" && <Nutrition db={db} userId={userId} onOpenSettings={() => setView("settings")} />}
 
       {view === "history" && <History db={db} userId={userId} unit={unit} onRepeat={repeatWorkout} />}
 
@@ -2144,10 +2150,11 @@ export default function Workout({
         />
       )}
       <BottomBar
-        selected={view === "home" ? "home" : view === "settings" ? null : "train"}
+        selected={view === "home" ? "home" : view === "nutrition" ? "nutrition" : view === "settings" ? null : "train"}
         onSelect={(sec: Section) => {
           if (sec === "home") setView("home");
-          else if (view === "home" || view === "settings") setView(inProgress ? "log" : trainTab);
+          else if (sec === "nutrition") setView("nutrition");
+          else if (view === "home" || view === "settings" || view === "nutrition") setView(inProgress ? "log" : trainTab);
         }}
       />
     </main>

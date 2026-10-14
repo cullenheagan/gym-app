@@ -2,7 +2,9 @@
 
 import { useRef, useState } from "react";
 import type { Unit } from "@/lib/units";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import Avatar from "./Avatar";
+import NutritionTargets from "./NutritionTargets";
 
 export type ThemeChoice = "light" | "dark" | "system";
 
@@ -35,6 +37,8 @@ function Segmented<T extends string>({
 }
 
 export default function Settings({
+  db,
+  userId,
   email,
   name,
   avatar,
@@ -46,6 +50,8 @@ export default function Settings({
   onUnit,
   onSignOut,
 }: {
+  db: SupabaseClient;
+  userId: string;
   email: string;
   name: string;
   avatar: string | null;
@@ -159,6 +165,8 @@ export default function Settings({
           />
         </div>
       </section>
+
+      <NutritionTargets db={db} userId={userId} unit={unit} />
 
       <p className="mt-4 px-1 text-xs text-muted">Signed in as {email}</p>
       <button type="button" onClick={onSignOut} className="mt-2 h-11 w-full rounded-[14px] bg-card text-sm font-bold text-red-600 shadow-sm">

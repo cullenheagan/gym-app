@@ -9,6 +9,8 @@ import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { formatClock, formatDuration } from "@/lib/format";
 import { type HomeWorkout, hasEarlier, kindBreakdown, templates, weekStartBack, weekTotals, weekWorkouts } from "@/lib/home-stats";
 import { type RawWorkout, type RepeatPlan, summarize, toPlan } from "./History";
+import MacroBars from "./MacroBars";
+import { EMPTY_PROFILE, type FoodEntry, type NutritionProfile, loadDay, loadNutritionProfile, localDate, sumMacros } from "@/lib/nutrition";
 
 const KIND_COLOR: Record<Kind, string> = {
   strength: "var(--accent)",
@@ -38,6 +40,7 @@ export default function Home({
   onStart,
   onResume,
   onTemplate,
+  onOpenNutrition,
   startOnly = false,
 }: {
   db: SupabaseClient;
@@ -50,6 +53,7 @@ export default function Home({
   onStart: (kind?: Kind) => void;
   onResume: () => void;
   onTemplate: (plan: RepeatPlan) => void;
+  onOpenNutrition?: () => void;
   startOnly?: boolean; // the Train > Workout screen: just the start button and shortcuts
 }) {
   const ck = cacheKey(userId, "home");
@@ -74,6 +78,20 @@ export default function Home({
       live = false;
     };
   }, [db, ck]);
+
+  // Today's nutrition for the Today card.
+  const [nProfile, setNProfile] = useState<NutritionProfile>(EMPTY_PROFILE);
+  const [todayFood, setTodayFood] = useState<FoodEntry[]>([]);
+  useEffect(() => {
+    if (startOnly) return;
+    let live = true;
+    loadNutritionProfile(db, userId).then((p) => live && setNProfile(p));
+    loadDay(db, userId, localDate()).then((r) => live && setTodayFood(r.entries));
+    return () => {
+      live = false;
+    };
+  }, [db, userId, startOnly]);
+  const todayTotals = useMemo(() => sumMacros(todayFood), [todayFood]);
 
   const tpls = useMemo(() => templates(list ?? []), [list]);
   // Tap the This week card to open a breakdown; arrows move back through earlier weeks.
@@ -155,6 +173,25 @@ export default function Home({
               </button>
             ))}
           </div>
+        </section>
+      )}
+
+      {!startOnly && onOpenNutrition && (
+        <section className="mt-6">
+          <h3 className="px-1 text-sm font-extrabold">Today</h3>
+          <button type="button" onClick={onOpenNutrition} className="mt-2 block w-full rounded-[20px] bg-card p-4 text-left shadow-sm">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-sm font-extrabold">Nutrition</span>
+              <span className="text-xs font-semibold text-muted">
+                {Math.round(todayTotals.kcal).toLocaleString("en-US")}
+                {nProfile.targets.kcal != null ? ` of ${Math.round(nProfile.targets.kcal).toLocaleString("en-US")}` : ""} kcal
+              </span>
+            </div>
+            <div className="mt-3">
+              <MacroBars totals={todayTotals} targets={nProfile.targets} />
+            </div>
+            {todayFood.length === 0 && <span className="mt-3 block text-xs font-bold text-accent">Log your first food</span>}
+          </button>
         </section>
       )}
 
