@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import NumField from "./NumField";
 import { explain } from "@/lib/net";
 import { type AmountUnit, type FoodEntry, type FoodHit, macrosFor, round1 } from "@/lib/nutrition";
+import { type FoodItem, type MyFoods, type SavedMeal, insertSavedFood, sameFood, sumItems } from "@/lib/saved-foods";
 
 // The Add food sheet: search the food database, or type the numbers in yourself.
 export default function AddFood({
@@ -12,6 +13,8 @@ export default function AddFood({
   userId,
   meal,
   date,
+  mine,
+  onMineChange,
   onAdded,
   onClose,
 }: {
@@ -19,10 +22,12 @@ export default function AddFood({
   userId: string;
   meal: string;
   date: string;
-  onAdded: (e: FoodEntry) => void;
+  mine: MyFoods;
+  onMineChange: (v: MyFoods) => void;
+  onAdded: (e: FoodEntry[]) => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"search" | "manual">("search");
+  const [tab, setTab] = useState<"search" | "mine" | "manual">("search");
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<FoodHit[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -39,6 +44,10 @@ export default function AddFood({
   const [protein, setProtein] = useState<number | null>(null);
   const [carbs, setCarbs] = useState<number | null>(null);
   const [fat, setFat] = useState<number | null>(null);
+
+  const [alsoSave, setAlsoSave] = useState(false); // also keep it in My foods
+  const [manage, setManage] = useState(false);
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
 
   const latest = useRef(0);
 
@@ -105,13 +114,53 @@ export default function AddFood({
     setError(null);
     const full: FoodEntry = { id: crypto.randomUUID(), eaten_on: date, meal, ...entry };
     const { error: err } = await db.from("food_entries").insert({ ...full, user_id: userId });
+    if (err) {
+      setSaving(false);
+      setError(explain(err.message, "Could not save that food."));
+      return;
+    }
+    if (alsoSave) await keep({ name: full.name, brand: full.brand, amount: full.amount, unit: full.unit, kcal: full.kcal, protein_g: full.protein_g, carbs_g: full.carbs_g, fat_g: full.fat_g });
+    setSaving(false);
+    onAdded([full]);
+    onClose();
+  }
+
+  // Keep a food in My foods (skipped when the same food at the same amount is already there).
+  async function keep(item: FoodItem) {
+    if (mine.foods.some((f) => sameFood(f, item))) return;
+    const r = await insertSavedFood(db, userId, item);
+    if (r.food) onMineChange({ ...mine, foods: [r.food, ...mine.foods], recent: mine.recent.filter((x) => !sameFood(x, item)) });
+  }
+
+  // One tap in My foods: add a saved food, a recent one, or every food of a saved meal.
+  async function addItems(items: FoodItem[], sourceId: string | null) {
+    setSaving(true);
+    setError(null);
+    const rows: FoodEntry[] = items.map((it) => ({ id: crypto.randomUUID(), eaten_on: date, meal, source: "saved", source_id: sourceId, ...it }));
+    const { error: err } = await db.from("food_entries").insert(rows.map((r) => ({ ...r, user_id: userId })));
     setSaving(false);
     if (err) {
       setError(explain(err.message, "Could not save that food."));
       return;
     }
-    onAdded(full);
+    onAdded(rows);
     onClose();
+  }
+
+  async function removeSaved(kind: "food" | "meal", id: string) {
+    if (confirmDel !== id) {
+      setConfirmDel(id);
+      window.setTimeout(() => setConfirmDel((c) => (c === id ? null : c)), 4000);
+      return;
+    }
+    const { error: err } = await db.from(kind === "food" ? "saved_foods" : "saved_meals").delete().eq("id", id);
+    setConfirmDel(null);
+    if (err) {
+      setError(explain(err.message, "Could not remove that."));
+      return;
+    }
+    setError(null);
+    onMineChange(kind === "food" ? { ...mine, foods: mine.foods.filter((f) => f.id !== id) } : { ...mine, meals: mine.meals.filter((m) => m.id !== id) });
   }
 
   function addFound() {
@@ -170,18 +219,19 @@ export default function AddFood({
         </div>
 
         <div className="mt-3 flex rounded-xl bg-line p-[3px]" role="group" aria-label="How to add">
-          {(["search", "manual"] as const).map((t) => (
+          {(["search", "mine", "manual"] as const).map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => {
                 setTab(t);
                 setError(null);
+                setAlsoSave(false);
               }}
               aria-pressed={tab === t}
               className={`h-10 flex-1 rounded-[10px] text-sm font-bold ${tab === t ? "bg-card text-ink" : "text-muted"}`}
             >
-              {t === "search" ? "Search" : "Type it in"}
+              {t === "search" ? "Search" : t === "mine" ? "My foods" : "Type it in"}
             </button>
           ))}
         </div>
@@ -225,7 +275,7 @@ export default function AddFood({
                   ))}
                 </ul>
               )}
-              {!hits && !searching && <p className="mt-3 text-sm font-medium text-muted">Type at least two letters. Food data comes from Open Food Facts.</p>}
+              {!hits && !searching && <p className="mt-3 text-sm font-medium text-muted">Type at least two letters. Food data comes from USDA and Open Food Facts.</p>}
             </>
           )}
 
@@ -249,6 +299,10 @@ export default function AddFood({
               <p className="mt-3 text-sm font-bold">
                 {preview ? `${Math.round(preview.kcal)} kcal · P ${round1(preview.protein)} · C ${round1(preview.carbs)} · F ${round1(preview.fat)}` : "Enter an amount"}
               </p>
+              <label className="mt-3 flex items-center gap-2 text-sm font-bold">
+                <input type="checkbox" checked={alsoSave} onChange={(e) => setAlsoSave(e.target.checked)} className="h-5 w-5 accent-[var(--accent)]" />
+                Also save to My foods
+              </label>
               <button
                 type="button"
                 onClick={addFound}
@@ -260,6 +314,82 @@ export default function AddFood({
               <button type="button" onClick={() => setHit(null)} disabled={saving} className="mt-1 h-11 w-full text-sm font-bold text-muted">
                 Back to results
               </button>
+            </div>
+          )}
+
+          {tab === "mine" && (
+            <div>
+              {mine.meals.length === 0 && mine.foods.length === 0 && mine.recent.length === 0 && (
+                <p className="text-sm font-medium text-muted">
+                  Nothing saved yet. Tap a food you logged and choose Save to My foods, or use Save as meal on a meal. Your recent foods show up here too.
+                </p>
+              )}
+              {(mine.meals.length > 0 || mine.foods.length > 0) && (
+                <div className="flex justify-end">
+                  <button type="button" onClick={() => setManage((m) => !m)} className="h-8 text-xs font-bold text-accent">
+                    {manage ? "Done" : "Edit"}
+                  </button>
+                </div>
+              )}
+              {mine.meals.length > 0 && <h3 className="text-xs font-extrabold uppercase tracking-wide text-muted">Saved meals</h3>}
+              {mine.meals.map((m: SavedMeal) => {
+                const t = sumItems(m.items);
+                return (
+                  <div key={m.id} className="flex items-center justify-between gap-3 border-t border-line py-2.5">
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-bold">{m.name}</span>
+                      <span className="block truncate text-xs font-medium text-muted">
+                        {m.items.length} {m.items.length === 1 ? "food" : "foods"} · {Math.round(t.kcal)} kcal · P {Math.round(t.protein)} C {Math.round(t.carbs)} F {Math.round(t.fat)}
+                      </span>
+                    </span>
+                    {manage ? (
+                      <button type="button" onClick={() => removeSaved("meal", m.id)} className="h-9 shrink-0 rounded-[10px] bg-field px-3 text-xs font-bold text-red-600">
+                        {confirmDel === m.id ? "Tap again" : "Remove"}
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => addItems(m.items, m.id)} disabled={saving} className="shrink-0 text-sm font-bold text-accent disabled:opacity-50">
+                        Add all
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              {mine.foods.length > 0 && <h3 className="mt-3 text-xs font-extrabold uppercase tracking-wide text-muted">Saved foods</h3>}
+              {mine.foods.map((f) => (
+                <div key={f.id} className="flex items-center justify-between gap-3 border-t border-line py-2.5">
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-bold">{f.name}</span>
+                    <span className="block truncate text-xs font-medium text-muted">
+                      {f.amount ? `${f.amount} ${f.unit ?? ""} · ` : ""}
+                      {Math.round(f.kcal)} kcal · P {round1(f.protein_g)} C {round1(f.carbs_g)} F {round1(f.fat_g)}
+                    </span>
+                  </span>
+                  {manage ? (
+                    <button type="button" onClick={() => removeSaved("food", f.id)} className="h-9 shrink-0 rounded-[10px] bg-field px-3 text-xs font-bold text-red-600">
+                      {confirmDel === f.id ? "Tap again" : "Remove"}
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => addItems([f], f.id)} disabled={saving} className="shrink-0 text-sm font-bold text-accent disabled:opacity-50">
+                      Add
+                    </button>
+                  )}
+                </div>
+              ))}
+              {mine.recent.length > 0 && <h3 className="mt-3 text-xs font-extrabold uppercase tracking-wide text-muted">Recent</h3>}
+              {mine.recent.map((f, i) => (
+                <div key={`${f.name}-${i}`} className="flex items-center justify-between gap-3 border-t border-line py-2.5">
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-bold">{f.name}</span>
+                    <span className="block truncate text-xs font-medium text-muted">
+                      {f.amount ? `${f.amount} ${f.unit ?? ""} · ` : ""}
+                      {Math.round(f.kcal)} kcal · P {round1(f.protein_g)} C {round1(f.carbs_g)} F {round1(f.fat_g)}
+                    </span>
+                  </span>
+                  <button type="button" onClick={() => addItems([f], null)} disabled={saving} className="shrink-0 text-sm font-bold text-accent disabled:opacity-50">
+                    Add
+                  </button>
+                </div>
+              ))}
             </div>
           )}
 
@@ -292,6 +422,10 @@ export default function AddFood({
                 </label>
               </div>
               <p className="text-xs font-medium text-muted">Leave calories empty and they are worked out from the macros.</p>
+              <label className="mt-0 flex items-center gap-2 text-sm font-bold">
+                <input type="checkbox" checked={alsoSave} onChange={(e) => setAlsoSave(e.target.checked)} className="h-5 w-5 accent-[var(--accent)]" />
+                Also save to My foods
+              </label>
               <button
                 type="button"
                 onClick={addManual}

@@ -6,6 +6,7 @@ import AddFood from "./AddFood";
 import MacroBars from "./MacroBars";
 import NumField from "./NumField";
 import { explain } from "@/lib/net";
+import { EMPTY_MY_FOODS, type MyFoods, cacheMyFoods, insertSavedFood, insertSavedMeal, itemFromEntry, loadMyFoods, sameFood } from "@/lib/saved-foods";
 import {
   EMPTY_PROFILE,
   type FoodEntry,
@@ -35,6 +36,10 @@ export default function Nutrition({ db, userId, onOpenSettings }: { db: Supabase
   const [error, setError] = useState<string | null>(null);
   const [mealsOpen, setMealsOpen] = useState(false);
   const [newMeal, setNewMeal] = useState("");
+  const [mine, setMine] = useState<MyFoods>(EMPTY_MY_FOODS);
+  const [mealFor, setMealFor] = useState<string | null>(null); // the meal section being saved as a meal
+  const [mealName, setMealName] = useState("");
+  const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -43,6 +48,49 @@ export default function Nutrition({ db, userId, onOpenSettings }: { db: Supabase
       live = false;
     };
   }, [db, userId]);
+
+  useEffect(() => {
+    let live = true;
+    loadMyFoods(db, userId).then((v) => live && setMine(v));
+    return () => {
+      live = false;
+    };
+  }, [db, userId]);
+
+  function changeMine(v: MyFoods) {
+    setMine(v);
+    cacheMyFoods(userId, v);
+  }
+
+  async function saveFood(e: FoodEntry) {
+    const item = itemFromEntry(e);
+    if (mine.foods.some((f) => sameFood(f, item))) {
+      setNote(`${e.name} is already in My foods.`);
+      return;
+    }
+    const r = await insertSavedFood(db, userId, item);
+    if (r.error || !r.food) {
+      setError(explain(r.error, "Could not save that food."));
+      return;
+    }
+    setError(null);
+    setNote(`Saved ${e.name} to My foods.`);
+    changeMine({ ...mine, foods: [r.food, ...mine.foods], recent: mine.recent.filter((x) => !sameFood(x, item)) });
+  }
+
+  async function saveMealFrom(list: FoodEntry[]) {
+    const name = mealName.trim().slice(0, 40);
+    if (!name || list.length === 0) return;
+    const r = await insertSavedMeal(db, userId, name, list.slice(0, 40).map(itemFromEntry));
+    if (r.error || !r.meal) {
+      setError(explain(r.error, "Could not save that meal."));
+      return;
+    }
+    setError(null);
+    setNote(`Saved ${name} to My foods.`);
+    setMealFor(null);
+    changeMine({ ...mine, meals: [r.meal, ...mine.meals] });
+  }
 
   useEffect(() => {
     let live = true;
@@ -184,6 +232,11 @@ export default function Nutrition({ db, userId, onOpenSettings }: { db: Supabase
           {error}
         </p>
       )}
+      {note && !error && (
+        <p role="status" className="mt-3 px-1 text-sm font-semibold text-done">
+          {note}
+        </p>
+      )}
 
       {!loaded ? (
         <p className="mt-4 px-1 text-sm font-medium text-muted">Loading...</p>
@@ -235,6 +288,9 @@ export default function Nutrition({ db, userId, onOpenSettings }: { db: Supabase
                           </button>
                         </div>
                       ) : null}
+                      <button type="button" onClick={() => saveFood(e)} className="h-10 rounded-[12px] bg-tint text-sm font-bold text-accent">
+                        Save to My foods
+                      </button>
                       <button type="button" onClick={() => remove(e)} className="h-10 rounded-[12px] bg-field text-sm font-bold text-red-600">
                         {confirmId === e.id ? "Tap again to remove" : "Remove"}
                       </button>
@@ -242,9 +298,40 @@ export default function Nutrition({ db, userId, onOpenSettings }: { db: Supabase
                   )}
                 </div>
               ))}
-              <button type="button" onClick={() => setAddTo(meal)} className="mt-3 h-10 w-full rounded-[12px] bg-tint text-sm font-bold text-accent">
+              <button type="button" onClick={() => { setAddTo(meal); setNote(null); }} className="mt-3 h-10 w-full rounded-[12px] bg-tint text-sm font-bold text-accent">
                 + Add food
               </button>
+              {list.length > 0 && mealFor !== meal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMealFor(meal);
+                    setMealName(meal);
+                    setNote(null);
+                  }}
+                  className="mt-1 h-9 w-full text-xs font-bold text-muted"
+                >
+                  Save as meal
+                </button>
+              )}
+              {mealFor === meal && (
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={mealName}
+                    onChange={(ev) => setMealName(ev.target.value)}
+                    placeholder="Name, like Usual breakfast"
+                    aria-label="Saved meal name"
+                    maxLength={40}
+                    className="h-11 min-w-0 flex-1 rounded-[14px] bg-field px-4 text-base outline-none"
+                  />
+                  <button type="button" onClick={() => saveMealFrom(list)} disabled={!mealName.trim()} className="h-11 rounded-[14px] bg-accent px-4 text-sm font-bold text-on-accent disabled:opacity-40">
+                    Save
+                  </button>
+                  <button type="button" onClick={() => setMealFor(null)} className="h-11 px-2 text-sm font-bold text-muted">
+                    Cancel
+                  </button>
+                </div>
+              )}
             </section>
           );
         })
@@ -297,7 +384,9 @@ export default function Nutrition({ db, userId, onOpenSettings }: { db: Supabase
           userId={userId}
           meal={addTo}
           date={date}
-          onAdded={(e) => change([...entries, e])}
+          mine={mine}
+          onMineChange={changeMine}
+          onAdded={(es) => change([...entries, ...es])}
           onClose={() => setAddTo(null)}
         />
       )}
