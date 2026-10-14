@@ -41,6 +41,7 @@ export default function Home({
   onResume,
   onTemplate,
   onOpenNutrition,
+  onOpenTrain,
   startOnly = false,
 }: {
   db: SupabaseClient;
@@ -54,6 +55,7 @@ export default function Home({
   onResume: () => void;
   onTemplate: (plan: RepeatPlan) => void;
   onOpenNutrition?: () => void;
+  onOpenTrain?: () => void; // Home: Start workout goes to Train, where you pick the kind
   startOnly?: boolean; // the Train > Workout screen: just the start button and shortcuts
 }) {
   const ck = cacheKey(userId, "home");
@@ -126,12 +128,12 @@ export default function Home({
 
       <button
         type="button"
-        onClick={inProgress ? onResume : () => onStart("strength")}
+        onClick={inProgress ? onResume : !startOnly && onOpenTrain ? onOpenTrain : () => onStart("strength")}
         className={`${startOnly ? "mt-0" : "mt-4"} w-full rounded-[20px] bg-accent p-5 text-left text-on-accent`}
       >
         <span className="block text-xl font-extrabold">{inProgress ? "Resume workout" : "Start workout"}</span>
         <span className="mt-0.5 block text-sm font-semibold opacity-90">
-          {inProgress ? `In progress \u00b7 ${formatClock(elapsedMs)}` : "Begin with an empty workout"}
+          {inProgress ? `In progress \u00b7 ${formatClock(elapsedMs)}` : startOnly ? "Begin with an empty workout" : "Choose what kind next"}
         </span>
       </button>
 

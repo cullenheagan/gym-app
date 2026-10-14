@@ -1622,6 +1622,7 @@ export default function Workout({
           onResume={() => setView("log")}
           onTemplate={repeatWorkout}
           onOpenNutrition={() => setView("nutrition")}
+          onOpenTrain={() => setView("log")}
         />
       )}
 
