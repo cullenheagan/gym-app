@@ -40,6 +40,9 @@ export default function Nutrition({ db, userId, onOpenSettings }: { db: Supabase
   const [mealFor, setMealFor] = useState<string | null>(null); // the meal section being saved as a meal
   const [mealName, setMealName] = useState("");
   const [note, setNote] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null); // the meal being renamed
+  const [renameText, setRenameText] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -166,6 +169,43 @@ export default function Nutrition({ db, userId, onOpenSettings }: { db: Supabase
     }
     setError(null);
     setProfile((p) => ({ ...p, mealNames: names }));
+  }
+
+  // Rename a meal everywhere: in your list, and on every food already logged under the old name.
+  async function renameMeal(oldName: string) {
+    const n = renameText.trim().slice(0, 24);
+    if (!n) return;
+    if (n === oldName) {
+      setRenaming(null);
+      return;
+    }
+    if (profile.mealNames.some((m) => m !== oldName && m.toLowerCase() === n.toLowerCase())) {
+      setError("You already have a meal with that name.");
+      return;
+    }
+    setRenameBusy(true);
+    setError(null);
+    const before = profile.mealNames;
+    const names = before.map((m) => (m === oldName ? n : m));
+    const p = await db.from("profiles").update({ meal_names: names }).eq("id", userId);
+    if (p.error) {
+      setRenameBusy(false);
+      setError(explain(p.error.message, "Could not rename that meal."));
+      return;
+    }
+    const f = await db.from("food_entries").update({ meal: n }).eq("meal", oldName);
+    if (f.error) {
+      // Put the list back so foods and the list still agree.
+      await db.from("profiles").update({ meal_names: before }).eq("id", userId);
+      setRenameBusy(false);
+      setError(explain(f.error.message, "Could not rename that meal."));
+      return;
+    }
+    setRenameBusy(false);
+    setRenaming(null);
+    setProfile((pr) => ({ ...pr, mealNames: names }));
+    change(entries.map((e) => (e.meal === oldName ? { ...e, meal: n } : e)));
+    setNote(`Renamed ${oldName} to ${n}.`);
   }
 
   function addMeal() {
@@ -344,19 +384,56 @@ export default function Nutrition({ db, userId, onOpenSettings }: { db: Supabase
         </button>
         {mealsOpen && (
           <div className="mt-3 flex flex-col gap-2">
-            {profile.mealNames.map((m) => (
-              <div key={m} className="flex items-center justify-between gap-3 text-sm">
-                <span className="font-bold">{m}</span>
-                <button
-                  type="button"
-                  onClick={() => profile.mealNames.length > 1 && saveMeals(profile.mealNames.filter((x) => x !== m))}
-                  disabled={profile.mealNames.length <= 1}
-                  className="h-9 rounded-[10px] bg-field px-3 text-xs font-bold text-red-600 disabled:opacity-40"
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
+            {profile.mealNames.map((m) =>
+              renaming === m ? (
+                <div key={m} className="flex items-center gap-2">
+                  <input
+                    value={renameText}
+                    onChange={(e) => setRenameText(e.target.value)}
+                    aria-label={`New name for ${m}`}
+                    maxLength={24}
+                    autoFocus
+                    className="h-11 min-w-0 flex-1 rounded-[14px] bg-field px-4 text-base outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => renameMeal(m)}
+                    disabled={renameBusy || !renameText.trim()}
+                    className="h-11 rounded-[14px] bg-accent px-4 text-sm font-bold text-on-accent disabled:opacity-40"
+                  >
+                    {renameBusy ? "Saving..." : "Save"}
+                  </button>
+                  <button type="button" onClick={() => setRenaming(null)} disabled={renameBusy} className="h-11 px-2 text-sm font-bold text-muted">
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div key={m} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="font-bold">{m}</span>
+                  <span className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRenaming(m);
+                        setRenameText(m);
+                        setError(null);
+                      }}
+                      className="h-9 rounded-[10px] bg-field px-3 text-xs font-bold"
+                    >
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => profile.mealNames.length > 1 && saveMeals(profile.mealNames.filter((x) => x !== m))}
+                      disabled={profile.mealNames.length <= 1}
+                      className="h-9 rounded-[10px] bg-field px-3 text-xs font-bold text-red-600 disabled:opacity-40"
+                    >
+                      Remove
+                    </button>
+                  </span>
+                </div>
+              ),
+            )}
             <p className="text-xs font-medium text-muted">Removing a meal only hides it. Foods you logged under it stay on their days.</p>
             <div className="flex gap-2">
               <input
