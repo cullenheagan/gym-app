@@ -135,7 +135,7 @@ export default function Home({
         </span>
       </button>
 
-      {!inProgress && (
+      {startOnly && !inProgress && (
         <section className="mt-6">
           <h3 className="px-1 text-sm font-extrabold">What kind?</h3>
           <div className="mt-2 grid grid-cols-2 gap-2">
@@ -154,7 +154,7 @@ export default function Home({
         </section>
       )}
 
-      {tpls.length > 0 && (
+      {startOnly && tpls.length > 0 && (
         <section className="mt-6">
           <h3 className="px-1 text-sm font-extrabold">Start from a past workout</h3>
           <div className="mt-2 grid grid-cols-2 gap-2">
