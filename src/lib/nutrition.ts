@@ -8,7 +8,8 @@ export type Macros = { kcal: number; protein: number; carbs: number; fat: number
 export type Targets = { kcal: number | null; protein: number | null; carbs: number | null; fat: number | null };
 
 export type NutritionProfile = {
-  targets: Targets;
+  targets: Targets; // training-day targets (also used on rest days for any number left empty below)
+  restTargets: Targets; // rest-day targets; an empty number means "use the training-day one"
   mealNames: string[];
   height_cm: number | null;
   weight_kg: number | null;
@@ -22,6 +23,7 @@ export const DEFAULT_MEALS = ["Breakfast", "Lunch", "Dinner", "Snacks"];
 
 export const EMPTY_PROFILE: NutritionProfile = {
   targets: { kcal: null, protein: null, carbs: null, fat: null },
+  restTargets: { kcal: null, protein: null, carbs: null, fat: null },
   mealNames: DEFAULT_MEALS,
   height_cm: null,
   weight_kg: null,
@@ -85,16 +87,20 @@ export const round1 = (n: number) => Math.round(n * 10) / 10;
 // ----- loading and caching -----
 
 const PROFILE_COLS =
-  "target_kcal,target_protein_g,target_carbs_g,target_fat_g,meal_names,height_cm,weight_kg,birth_year,sex,activity_level,nutrition_goal";
+  "target_kcal,target_protein_g,target_carbs_g,target_fat_g,rest_kcal,rest_protein_g,rest_carbs_g,rest_fat_g,meal_names,height_cm,weight_kg,birth_year,sex,activity_level,nutrition_goal";
 
 export async function loadNutritionProfile(db: SupabaseClient, userId: string): Promise<NutritionProfile> {
   const ck = cacheKey(userId, "nutrition-profile");
   const res = await db.from("profiles").select(PROFILE_COLS).eq("id", userId).maybeSingle();
-  if (res.error || !res.data) return readCache<NutritionProfile>(ck) ?? EMPTY_PROFILE;
+  if (res.error || !res.data) {
+    const copy = readCache<NutritionProfile>(ck);
+    return copy ? { ...EMPTY_PROFILE, ...copy } : EMPTY_PROFILE; // an older saved copy has no rest-day targets
+  }
   const r = res.data as Record<string, unknown>;
   const names = Array.isArray(r.meal_names) ? (r.meal_names as unknown[]).filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
   const p: NutritionProfile = {
     targets: { kcal: num(r.target_kcal), protein: num(r.target_protein_g), carbs: num(r.target_carbs_g), fat: num(r.target_fat_g) },
+    restTargets: { kcal: num(r.rest_kcal), protein: num(r.rest_protein_g), carbs: num(r.rest_carbs_g), fat: num(r.rest_fat_g) },
     mealNames: names.length > 0 ? names : DEFAULT_MEALS,
     height_cm: num(r.height_cm),
     weight_kg: num(r.weight_kg),
@@ -145,6 +151,35 @@ export async function loadDay(db: SupabaseClient, userId: string, date: string):
 
 export function cacheDay(userId: string, date: string, entries: FoodEntry[]): void {
   writeCache(cacheKey(userId, `food:${date}`), entries);
+}
+
+// ----- training days -----
+
+// The targets for a day: training-day targets on a training day; on a rest day, each rest-day
+// number you set, and the training-day number for any you left empty.
+export function targetsFor(p: NutritionProfile, trainingDay: boolean): Targets {
+  if (trainingDay) return p.targets;
+  const r = p.restTargets ?? EMPTY_PROFILE.restTargets;
+  return {
+    kcal: r.kcal ?? p.targets.kcal,
+    protein: r.protein ?? p.targets.protein,
+    carbs: r.carbs ?? p.targets.carbs,
+    fat: r.fat ?? p.targets.fat,
+  };
+}
+
+// A day counts as a training day when a workout was started that day (your local day).
+// Falls back to the copy kept on this phone when there is no signal.
+export async function loadTrained(db: SupabaseClient, userId: string, date: string): Promise<boolean> {
+  const ck = cacheKey(userId, `trained:${date}`);
+  const [y, m, d] = date.split("-").map(Number);
+  const from = new Date(y, m - 1, d);
+  const to = new Date(y, m - 1, d + 1);
+  const res = await db.from("workouts").select("id").gte("started_at", from.toISOString()).lt("started_at", to.toISOString()).limit(1);
+  if (res.error) return readCache<boolean>(ck) ?? false;
+  const trained = (res.data ?? []).length > 0;
+  writeCache(ck, trained);
+  return trained;
 }
 
 // ----- food amounts -----

@@ -10,7 +10,7 @@ import { formatClock, formatDuration } from "@/lib/format";
 import { type HomeWorkout, hasEarlier, kindBreakdown, templates, weekStartBack, weekTotals, weekWorkouts } from "@/lib/home-stats";
 import { type RawWorkout, type RepeatPlan, summarize, toPlan } from "./History";
 import MacroBars from "./MacroBars";
-import { EMPTY_PROFILE, type FoodEntry, type NutritionProfile, loadDay, loadNutritionProfile, localDate, sumMacros } from "@/lib/nutrition";
+import { EMPTY_PROFILE, type FoodEntry, type NutritionProfile, loadDay, loadNutritionProfile, localDate, sumMacros, targetsFor } from "@/lib/nutrition";
 
 const KIND_COLOR: Record<Kind, string> = {
   strength: "var(--accent)",
@@ -94,6 +94,9 @@ export default function Home({
     };
   }, [db, userId, startOnly]);
   const todayTotals = useMemo(() => sumMacros(todayFood), [todayFood]);
+  // Training-day targets when a workout was started today (or is in progress), else rest-day targets.
+  const trainingToday = inProgress || (list ?? []).some((w) => localDate(new Date(w.startedAt)) === localDate());
+  const todayTargets = targetsFor(nProfile, trainingToday);
 
   const tpls = useMemo(() => templates(list ?? []), [list]);
   // Tap the This week card to open a breakdown; arrows move back through earlier weeks.
@@ -186,11 +189,11 @@ export default function Home({
               <span className="text-sm font-extrabold">Nutrition</span>
               <span className="text-xs font-semibold text-muted">
                 {Math.round(todayTotals.kcal).toLocaleString("en-US")}
-                {nProfile.targets.kcal != null ? ` of ${Math.round(nProfile.targets.kcal).toLocaleString("en-US")}` : ""} kcal
+                {todayTargets.kcal != null ? ` of ${Math.round(todayTargets.kcal).toLocaleString("en-US")}` : ""} kcal
               </span>
             </div>
             <div className="mt-3">
-              <MacroBars totals={todayTotals} targets={nProfile.targets} />
+              <MacroBars totals={todayTotals} targets={todayTargets} />
             </div>
             {todayFood.length === 0 && <span className="mt-3 block text-xs font-bold text-accent">Log your first food</span>}
           </button>

@@ -14,6 +14,8 @@ import {
   cacheDay,
   loadDay,
   loadNutritionProfile,
+  loadTrained,
+  targetsFor,
   localDate,
   prettyDate,
   round1,
@@ -22,7 +24,7 @@ import {
 } from "@/lib/nutrition";
 
 // The Nutrition tab: what you ate on a day, by meal, against your daily targets.
-export default function Nutrition({ db, userId, onOpenSettings }: { db: SupabaseClient; userId: string; onOpenSettings: () => void }) {
+export default function Nutrition({ db, userId, inProgress, onOpenSettings }: { db: SupabaseClient; userId: string; inProgress: boolean; onOpenSettings: () => void }) {
   const today = localDate();
   const [date, setDate] = useState(today);
   const [entries, setEntries] = useState<FoodEntry[]>([]);
@@ -34,6 +36,7 @@ export default function Nutrition({ db, userId, onOpenSettings }: { db: Supabase
   const [editAmount, setEditAmount] = useState<number | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [trained, setTrained] = useState(false); // a workout was started on the day shown
   const [mealsOpen, setMealsOpen] = useState(false);
   const [newMeal, setNewMeal] = useState("");
   const [mine, setMine] = useState<MyFoods>(EMPTY_MY_FOODS);
@@ -109,8 +112,19 @@ export default function Nutrition({ db, userId, onOpenSettings }: { db: Supabase
     };
   }, [db, userId, date]);
 
+  useEffect(() => {
+    let live = true;
+    setTrained(false);
+    loadTrained(db, userId, date).then((v) => live && setTrained(v));
+    return () => {
+      live = false;
+    };
+  }, [db, userId, date]);
+
   const totals = useMemo(() => sumMacros(entries), [entries]);
-  const t = profile.targets;
+  // A workout in progress counts for today before it is saved.
+  const trainingDay = trained || (date === today && inProgress);
+  const t = targetsFor(profile, trainingDay);
 
   // Your meals, plus any meal name that has foods on this day but was removed from the list.
   const sections = useMemo(() => {
@@ -240,6 +254,8 @@ export default function Nutrition({ db, userId, onOpenSettings }: { db: Supabase
           {"›"}
         </button>
       </div>
+
+      <p className="mt-1 text-center text-xs font-bold text-muted">{trainingDay ? "Training day" : "Rest day"}</p>
 
       {saved && <p className="mt-2 px-1 text-xs font-semibold text-muted">Showing the copy saved on this phone.</p>}
 

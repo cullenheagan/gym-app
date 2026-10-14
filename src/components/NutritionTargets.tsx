@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import NumField from "./NumField";
 import { explain } from "@/lib/net";
 import { type Unit, fromDisplay, toDisplay } from "@/lib/units";
-import { EMPTY_PROFILE, type NutritionProfile, loadNutritionProfile, suggestTargets } from "@/lib/nutrition";
+import { EMPTY_PROFILE, type NutritionProfile, type Targets, loadNutritionProfile, suggestTargets } from "@/lib/nutrition";
 
 const CM_PER_IN = 2.54;
 
@@ -33,6 +33,30 @@ function Choice<T extends string>({
           {o.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+// Four boxes: calories, protein, carbs, fat.
+function TargetGrid({ label, t, onChange }: { label: string; t: Targets; onChange: (k: keyof Targets, v: number | null) => void }) {
+  return (
+    <div className="mt-3 grid grid-cols-2 gap-2">
+      <label className="text-xs font-bold text-muted">
+        Calories
+        <NumField integer ariaLabel={`${label} calories`} value={t.kcal} onChange={(v) => onChange("kcal", v)} max={9999} />
+      </label>
+      <label className="text-xs font-bold text-muted">
+        Protein (g)
+        <NumField integer ariaLabel={`${label} protein in grams`} value={t.protein} onChange={(v) => onChange("protein", v)} max={999} />
+      </label>
+      <label className="text-xs font-bold text-muted">
+        Carbs (g)
+        <NumField integer ariaLabel={`${label} carbs in grams`} value={t.carbs} onChange={(v) => onChange("carbs", v)} max={999} />
+      </label>
+      <label className="text-xs font-bold text-muted">
+        Fat (g)
+        <NumField integer ariaLabel={`${label} fat in grams`} value={t.fat} onChange={(v) => onChange("fat", v)} max={999} />
+      </label>
     </div>
   );
 }
@@ -65,6 +89,10 @@ export default function NutritionTargets({ db, userId, unit }: { db: SupabaseCli
     setP((cur) => ({ ...cur, targets: { ...cur.targets, [k]: v } }));
   }
 
+  function setRest(k: keyof Targets, v: number | null) {
+    setP((cur) => ({ ...cur, restTargets: { ...cur.restTargets, [k]: v } }));
+  }
+
   function suggest() {
     const s = suggestTargets(p);
     if (!s) {
@@ -86,6 +114,10 @@ export default function NutritionTargets({ db, userId, unit }: { db: SupabaseCli
         target_protein_g: t.protein,
         target_carbs_g: t.carbs,
         target_fat_g: t.fat,
+        rest_kcal: p.restTargets.kcal == null ? null : Math.round(p.restTargets.kcal),
+        rest_protein_g: p.restTargets.protein,
+        rest_carbs_g: p.restTargets.carbs,
+        rest_fat_g: p.restTargets.fat,
         height_cm: p.height_cm,
         weight_kg: p.weight_kg,
         birth_year: p.birth_year,
@@ -112,24 +144,13 @@ export default function NutritionTargets({ db, userId, unit }: { db: SupabaseCli
         <p className="mt-3 text-sm font-medium text-muted">Loading...</p>
       ) : (
         <>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <label className="text-xs font-bold text-muted">
-              Calories
-              <NumField integer ariaLabel="Daily calories" value={p.targets.kcal} onChange={(v) => setTarget("kcal", v)} max={9999} />
-            </label>
-            <label className="text-xs font-bold text-muted">
-              Protein (g)
-              <NumField integer ariaLabel="Daily protein in grams" value={p.targets.protein} onChange={(v) => setTarget("protein", v)} max={999} />
-            </label>
-            <label className="text-xs font-bold text-muted">
-              Carbs (g)
-              <NumField integer ariaLabel="Daily carbs in grams" value={p.targets.carbs} onChange={(v) => setTarget("carbs", v)} max={999} />
-            </label>
-            <label className="text-xs font-bold text-muted">
-              Fat (g)
-              <NumField integer ariaLabel="Daily fat in grams" value={p.targets.fat} onChange={(v) => setTarget("fat", v)} max={999} />
-            </label>
-          </div>
+          <h4 className="mt-3 text-sm font-extrabold">Training day targets</h4>
+          <p className="mt-0.5 text-xs text-muted">Days you log a workout. Also used on rest days for anything you leave empty below.</p>
+          <TargetGrid label="Training day" t={p.targets} onChange={setTarget} />
+
+          <h4 className="mt-5 text-sm font-extrabold">Rest day targets (optional)</h4>
+          <p className="mt-0.5 text-xs text-muted">Days with no workout. Empty means the same as training days.</p>
+          <TargetGrid label="Rest day" t={p.restTargets} onChange={setRest} />
 
           <button type="button" onClick={() => setStatsOpen((o) => !o)} aria-expanded={statsOpen} className="mt-4 text-sm font-bold text-accent">
             {statsOpen ? "Hide my stats ▴" : "Suggest targets from my stats and goal ▾"}

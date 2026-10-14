@@ -1643,7 +1643,7 @@ export default function Workout({
         />
       )}
 
-      {view === "nutrition" && <Nutrition db={db} userId={userId} onOpenSettings={() => setView("settings")} />}
+      {view === "nutrition" && <Nutrition db={db} userId={userId} inProgress={inProgress} onOpenSettings={() => setView("settings")} />}
 
       {view === "history" && <History db={db} userId={userId} unit={unit} onRepeat={repeatWorkout} />}
 
