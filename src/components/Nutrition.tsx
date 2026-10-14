@@ -5,6 +5,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import AddFood from "./AddFood";
 import MacroBars from "./MacroBars";
 import NumField from "./NumField";
+import { WeightCard } from "./BodyWeight";
+import type { Unit } from "@/lib/units";
 import { explain } from "@/lib/net";
 import { EMPTY_MY_FOODS, type MyFoods, cacheMyFoods, insertSavedFood, insertSavedMeal, itemFromEntry, loadMyFoods, sameFood } from "@/lib/saved-foods";
 import {
@@ -24,7 +26,19 @@ import {
 } from "@/lib/nutrition";
 
 // The Nutrition tab: what you ate on a day, by meal, against your daily targets.
-export default function Nutrition({ db, userId, inProgress, onOpenSettings }: { db: SupabaseClient; userId: string; inProgress: boolean; onOpenSettings: () => void }) {
+export default function Nutrition({
+  db,
+  userId,
+  unit,
+  inProgress,
+  onOpenSettings,
+}: {
+  db: SupabaseClient;
+  userId: string;
+  unit: Unit;
+  inProgress: boolean;
+  onOpenSettings: () => void;
+}) {
   const today = localDate();
   const [date, setDate] = useState(today);
   const [entries, setEntries] = useState<FoodEntry[]>([]);
@@ -392,6 +406,8 @@ export default function Nutrition({ db, userId, inProgress, onOpenSettings }: { 
           );
         })
       )}
+
+      <WeightCard db={db} userId={userId} unit={unit} date={date} />
 
       <section className="mt-3 rounded-[20px] bg-card p-4 shadow-sm">
         <button type="button" onClick={() => setMealsOpen((o) => !o)} aria-expanded={mealsOpen} className="flex w-full items-center justify-between text-left text-sm font-extrabold">

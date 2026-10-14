@@ -7,6 +7,7 @@ import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { explain } from "@/lib/net";
 import { describeSet, kindOf, type Kind } from "@/lib/kinds";
 import { repsText } from "@/lib/sides";
+import { WeightProgress } from "./BodyWeight";
 import {
   type ExerciseProgress,
   type Metric,
@@ -291,6 +292,7 @@ export default function Progress({ db, userId, unit }: { db: SupabaseClient; use
     <div className="px-4 pb-8 pt-4">
       <h2 className="px-1 text-[32px] font-extrabold leading-tight tracking-tight">Progress</h2>
       <p className="px-1 text-[13px] text-muted">Tap an exercise to see how it is trending</p>
+      <WeightProgress db={db} userId={userId} unit={unit} />
       {error && <p role="alert" className="mt-3 rounded-[14px] bg-tint px-4 py-3 text-[13px] font-semibold text-accent">{error}{rows ? " Showing your last saved copy." : ""}</p>}
       <label htmlFor="pq" className="sr-only">Search exercises</label>
       <input id="pq" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search exercises" className="mt-3 h-11 w-full rounded-full border border-line bg-card px-4 text-base outline-none" />
