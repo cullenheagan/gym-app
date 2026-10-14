@@ -32,13 +32,17 @@ export default function Scanner({ onCode, onClose, onTypeIt }: { onCode: (code: 
     (async () => {
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error("no camera");
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
         if (stop) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
         const v = video.current;
         if (!v) return;
+        // Ask for continuous autofocus when the phone offers it (helps up close); ignored otherwise.
+        try {
+          await stream.getVideoTracks()[0]?.applyConstraints({ advanced: [{ focusMode: "continuous" } as MediaTrackConstraintSet] });
+        } catch {}
         v.srcObject = stream;
         await v.play();
         const BD = (window as unknown as { BarcodeDetector?: new (o: { formats: string[] }) => Detector }).BarcodeDetector;
@@ -59,11 +63,15 @@ export default function Scanner({ onCode, onClose, onTypeIt }: { onCode: (code: 
                 code = r[0]?.rawValue ?? null;
               }
               if (!code && ctx) {
-                const w = Math.min(960, v.videoWidth);
-                const h = Math.round((v.videoHeight * w) / v.videoWidth);
+                // Read the middle of the picture at full size (a small barcode needs every pixel).
+                const w = Math.min(1920, v.videoWidth);
+                const scale = w / v.videoWidth;
+                const sy = Math.round(v.videoHeight * 0.22);
+                const sh = Math.round(v.videoHeight * 0.56);
+                const h = Math.max(8, Math.round(sh * scale));
                 canvas.width = w;
                 canvas.height = h;
-                ctx.drawImage(v, 0, 0, w, h);
+                ctx.drawImage(v, 0, sy, v.videoWidth, sh, 0, 0, w, h);
                 code = decodeFrame(ctx.getImageData(0, 0, w, h).data, w, h);
               }
               if (code) found(code);

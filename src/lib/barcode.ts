@@ -165,18 +165,32 @@ export function decodeRow(row: ArrayLike<number>): string | null {
   return tryDecode([...r.len].reverse(), lastIsBar);
 }
 
-// Decode a camera frame (RGBA pixels) by trying several rows through the middle band.
+// Stretch a row to twice its length (straight lines between pixels). Narrow bars then span more
+// samples, which helps when the barcode is small in the picture.
+function stretch(row: ArrayLike<number>): Float32Array {
+  const n = row.length;
+  const out = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    out[2 * i] = row[i];
+    out[2 * i + 1] = (row[i] + row[Math.min(n - 1, i + 1)]) / 2;
+  }
+  return out;
+}
+
+// Decode a camera frame (RGBA pixels) by trying many rows through the middle band, each as it is
+// and stretched. Bigger frames read better: a barcode needs about 3 pixels per thinnest bar.
 export function decodeFrame(rgba: Uint8ClampedArray, width: number, height: number): string | null {
   const lum = (x: number, y: number) => {
     const o = (y * width + x) * 4;
     return (rgba[o] * 77 + rgba[o + 1] * 150 + rgba[o + 2] * 29) >> 8;
   };
-  const rows = [0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65, 0.3, 0.7];
   const line = new Uint8Array(width);
-  for (const f of rows) {
+  for (let k = 0; k < 17; k++) {
+    // 50%, then outwards: 47%, 53%, 44%, 56% ... up to 26% and 74%.
+    const f = 0.5 + (k === 0 ? 0 : (k % 2 === 1 ? -1 : 1) * Math.ceil(k / 2) * 0.03);
     const y = Math.min(height - 2, Math.max(1, Math.round(height * f)));
     for (let x = 0; x < width; x++) line[x] = (lum(x, y - 1) + lum(x, y) + lum(x, y + 1)) / 3;
-    const code = decodeRow(line);
+    const code = decodeRow(line) ?? decodeRow(stretch(line));
     if (code) return code;
   }
   return null;
