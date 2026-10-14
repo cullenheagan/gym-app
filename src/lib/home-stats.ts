@@ -76,3 +76,28 @@ export function templates<P extends { exercises: unknown[] }>(ws: HomeWorkout<P>
   }
   return [...map.values()].sort((a, b) => b.count - a.count).slice(0, max);
 }
+
+// The workout that usually comes next: look at what you did right after your most recent workout
+// each time before, and pick the most common follow-up (at least twice; a tie goes to the more
+// recent one). Newest-first input. Returns the shortcut for that workout, or null when there is no
+// pattern yet.
+export function nextInRotation<P extends { exercises: unknown[] }>(ws: HomeWorkout<P>[]): Template<P> | null {
+  const keyOf = (w: HomeWorkout<P>) => `${w.kind ?? "strength"}:${normName(w.name)}`;
+  const seq = [...ws].reverse().filter((w) => normName(w.name) && w.plan.exercises.length > 0); // oldest first
+  if (seq.length < 3) return null;
+  const last = keyOf(seq[seq.length - 1]);
+  const next = new Map<string, { n: number; at: number }>();
+  for (let i = 0; i < seq.length - 1; i++) {
+    if (keyOf(seq[i]) !== last) continue;
+    const k = keyOf(seq[i + 1]);
+    const cur = next.get(k) ?? { n: 0, at: 0 };
+    next.set(k, { n: cur.n + 1, at: i });
+  }
+  let best: string | null = null;
+  for (const [k, v] of next) {
+    if (v.n < 2) continue;
+    const b = best ? next.get(best) : null;
+    if (!b || v.n > b.n || (v.n === b.n && v.at > b.at)) best = k;
+  }
+  return best ? templates(ws, 999).find((t) => t.key === best) ?? null : null;
+}

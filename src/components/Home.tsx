@@ -7,7 +7,7 @@ import { KINDS, type Kind, kindLabel } from "@/lib/kinds";
 import ActivityCalendar from "./ActivityCalendar";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { formatClock, formatDuration } from "@/lib/format";
-import { type HomeWorkout, hasEarlier, kindBreakdown, templates, weekStartBack, weekTotals, weekWorkouts } from "@/lib/home-stats";
+import { nextInRotation, type HomeWorkout, hasEarlier, kindBreakdown, templates, weekStartBack, weekTotals, weekWorkouts } from "@/lib/home-stats";
 import { type RawWorkout, type RepeatPlan, summarize, toPlan } from "./History";
 import MacroBars from "./MacroBars";
 import { EMPTY_PROFILE, type FoodEntry, type NutritionProfile, loadDay, loadNutritionProfile, localDate, sumMacros, targetsFor } from "@/lib/nutrition";
@@ -99,6 +99,10 @@ export default function Home({
   const todayTargets = targetsFor(nProfile, trainingToday);
 
   const tpls = useMemo(() => templates(list ?? []), [list]);
+  // The workout that usually follows your last one (needs a pattern of at least two repeats).
+  const nextUp = useMemo(() => nextInRotation(list ?? []), [list]);
+  // Past-workout shortcuts, with the next-up workout first (added even when it is not in the top few).
+  const shortcuts = useMemo(() => (nextUp ? [nextUp, ...tpls.filter((t) => t.key !== nextUp.key)] : tpls), [nextUp, tpls]);
   // Tap the This week card to open a breakdown; arrows move back through earlier weeks.
   const [weekOpen, setWeekOpen] = useState(false);
   const [back, setBack] = useState(0);
@@ -136,7 +140,7 @@ export default function Home({
       >
         <span className="block text-xl font-extrabold">{inProgress ? "Resume workout" : "Start workout"}</span>
         <span className="mt-0.5 block text-sm font-semibold opacity-90">
-          {inProgress ? `In progress \u00b7 ${formatClock(elapsedMs)}` : startOnly ? "Begin with an empty workout" : "Choose what kind next"}
+          {inProgress ? `In progress \u00b7 ${formatClock(elapsedMs)}` : startOnly ? "Begin with an empty workout" : nextUp ? `Next up: ${nextUp.label}` : "Choose what kind next"}
         </span>
       </button>
 
@@ -159,11 +163,11 @@ export default function Home({
         </section>
       )}
 
-      {startOnly && tpls.length > 0 && (
+      {startOnly && shortcuts.length > 0 && (
         <section className="mt-6">
           <h3 className="px-1 text-sm font-extrabold">Start from a past workout</h3>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            {tpls.map((t) => (
+            {shortcuts.map((t) => (
               <button
                 key={t.key}
                 type="button"
@@ -171,6 +175,7 @@ export default function Home({
                 className="rounded-[14px] bg-card px-4 py-3 text-left shadow-sm"
               >
                 <span className="block truncate text-sm font-extrabold">{t.label}</span>
+                {nextUp && t.key === nextUp.key && <span className="block text-xs font-bold text-accent">Next in your rotation</span>}
                 <span className="block text-xs text-muted">
                   {t.kind !== "strength" ? `${kindLabel(t.kind)} · ` : ""}
                   {t.plan.exercises.length} {t.plan.exercises.length === 1 ? "exercise" : "exercises"}
