@@ -81,14 +81,31 @@ self.addEventListener("message", (event) => {
   if (!data || data.type !== "CACHE_URLS" || !Array.isArray(data.urls)) return;
   event.waitUntil(
     caches.open(STATIC).then(async (cache) => {
+      const keep = new Set();
       for (const u of data.urls) {
         try {
           const url = new URL(u, self.location.origin);
           if (url.origin !== self.location.origin || !isStatic(url)) continue;
+          keep.add(url.pathname + url.search);
           if (await cache.match(url.pathname + url.search)) continue;
           const res = await fetch(url.pathname + url.search);
           if (res.ok) await cache.put(url.pathname + url.search, res);
         } catch (e) {}
+      }
+      // Each app update has new built files, so the saved ones from older versions pile up.
+      // The page just listed every built file it uses; drop the rest. Only done when the list
+      // looks complete (some script and some stylesheet, and not so long the browser cut it off).
+      const names = [...keep];
+      const complete =
+        names.some((n) => n.startsWith("/_next/static/") && n.includes(".js")) &&
+        names.some((n) => n.startsWith("/_next/static/") && n.includes(".css")) &&
+        data.urls.length < 200;
+      if (complete) {
+        for (const req of await cache.keys()) {
+          const url = new URL(req.url);
+          const path = url.pathname + url.search;
+          if (url.pathname.startsWith("/_next/static/") && !keep.has(path)) await cache.delete(req);
+        }
       }
     }),
   );

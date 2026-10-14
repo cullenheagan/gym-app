@@ -2,6 +2,10 @@
 
 Newest first. Each entry says what changed and why. Mirrored in the Notion "Gym App" wiki.
 
+## 2026-10-14
+- Same-owner guard (from the code audit): the database now refuses to save a workout, set, exercise, bench setup or profile that points at another account's gym, workout, exercise or setup. Row-level security already hid other accounts' rows; this closes the last gap in case someone guessed an id. Normal saving and syncing are unchanged (tested). Migration 0017 adds five triggers and one function; existing data untouched and all current rows already passed.
+- Offline files: the saved app files from older versions are cleaned up each time the app updates, so they stop piling up on the phone. The current version's files are kept, so offline still works.
+
 ## 2026-10-13
 - This week breakdown: the This week card on Home is now tappable (See breakdown). It opens in place and shows time per workout type (a colored bar plus count, time and weight lifted for each of Strength, Cardio, Intervals and Sport), then every workout of the week with its day, type, weight lifted and time. Arrows at the top move back through earlier weeks (as far back as your last 60 workouts), and the numbers on the card follow the week you are looking at. Intervals and Sport got their own colors (purple and amber) next to the blue and green. No database change.
 - Security hardening (from the code audit): photo uploads are limited to images (JPEG, PNG, WebP) under 5 MB; signing out removes the copies of your history, exercises, last-time sets, name and photo kept on the phone (workouts still waiting to sync and an unfinished workout are kept so nothing is lost); every page now sends security headers (can't be embedded in another site, no file-type guessing, limited referrer, no microphone or location access); and the unused permissions to empty tables, add triggers or make foreign keys were removed from signed-in and signed-out users. Migration 0016 (permissions and the photo limits); existing data and photos untouched.
