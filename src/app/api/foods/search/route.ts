@@ -85,13 +85,21 @@ async function searchOff(q: string): Promise<FoodHit[] | null> {
 }
 
 // USDA FoodData Central (free key in USDA_API_KEY). Without the key this source is simply skipped.
+// Plain foods (Foundation, SR Legacy) and packaged ones (Branded) are asked for separately: in one
+// combined search, the many branded products crowd the plain food ("Bananas, raw") out of the results.
 async function searchUsda(q: string): Promise<(FoodHit & { generic: boolean })[] | null> {
   const key = process.env.USDA_API_KEY;
   if (!key) return null;
+  const [plain, branded] = await Promise.all([usdaSearch(q, "Foundation,SR Legacy", 10, key), usdaSearch(q, "Branded", 20, key)]);
+  if (plain === null && branded === null) return null;
+  return [...(plain ?? []), ...(branded ?? [])];
+}
+
+async function usdaSearch(q: string, dataType: string, pageSize: number, key: string): Promise<(FoodHit & { generic: boolean })[] | null> {
   const u = new URL("https://api.nal.usda.gov/fdc/v1/foods/search");
   u.searchParams.set("query", q);
-  u.searchParams.set("pageSize", "25");
-  u.searchParams.set("dataType", "Foundation,SR Legacy,Branded");
+  u.searchParams.set("pageSize", String(pageSize));
+  u.searchParams.set("dataType", dataType);
   const body = (await timed((signal) => fetch(u, { signal, headers: { "X-Api-Key": key, Accept: "application/json" }, cache: "no-store" }))) as {
     foods?: unknown;
   } | null;
