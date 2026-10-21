@@ -2,7 +2,14 @@
 
 A workout and nutrition tracker that installs on your phone like an app and keeps working with no signal at the gym. I use it at the gym, and so do a few friends.
 
-**Live app:** https://gym-app-che-88ce.vercel.app. Tap **Look around as a guest** on the sign-in screen to get your own private copy filled with four weeks of sample workouts, food and bodyweight, with no sign-up needed. Guest accounts are deleted after 7 days.
+**Live app:** https://gym-app-three-sand.vercel.app. Tap **Look around as a guest** on the sign-in screen to get your own private copy filled with four weeks of sample workouts, food and bodyweight, with no sign-up needed. Guest accounts are deleted after 7 days.
+
+<p>
+  <img src="docs/screenshots/home.jpg" width="200" alt="Home: next workout, today's macros, this week">
+  <img src="docs/screenshots/train.jpg" width="200" alt="Train: start a workout or repeat a past one">
+  <img src="docs/screenshots/progress.jpg" width="200" alt="Progress: bodyweight trend and per-exercise charts">
+  <img src="docs/screenshots/nutrition.jpg" width="200" alt="Nutrition: calories, macros and foods by meal">
+</p>
 
 ## What it does
 
