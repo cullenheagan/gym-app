@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { localDate } from "@/lib/nutrition";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import AuthForm from "./AuthForm";
@@ -39,6 +40,26 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [fallback, setFallback] = useState<KnownUser | null>(null);
   const [ready, setReady] = useState(false);
+  // Guest demo: the guest's own account is filled with sample data once, before the app opens.
+  const [seeded, setSeeded] = useState<string | null>(null);
+  const [seedError, setSeedError] = useState<string | null>(null);
+  const guestId = session?.user.is_anonymous ? session.user.id : null;
+
+  useEffect(() => {
+    if (!supabase || !guestId || seeded === guestId) return;
+    let cancelled = false;
+    setSeedError(null);
+    supabase
+      .rpc("seed_guest_data", { p_today: localDate(), p_offset_min: new Date().getTimezoneOffset() })
+      .then(({ error }: { error: { message: string } | null }) => {
+        if (cancelled) return;
+        if (error) setSeedError(error.message);
+        else setSeeded(guestId);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [guestId, seeded]);
 
   useEffect(() => {
     if (!supabase) {
@@ -94,11 +115,35 @@ export default function App() {
     return <AuthForm db={db} />;
   }
 
+  if (guestId && seeded !== guestId) {
+    return (
+      <main className="mx-auto max-w-md px-5 pt-16">
+        {seedError ? (
+          <>
+            <p role="alert" className="font-semibold text-red-600">
+              Could not set up the guest demo: {seedError}
+            </p>
+            <button
+              type="button"
+              onClick={() => db.auth.signOut()}
+              className="mt-4 h-11 text-sm font-bold text-accent"
+            >
+              Back to sign in
+            </button>
+          </>
+        ) : (
+          <p className="text-muted">Setting up the guest demo...</p>
+        )}
+      </main>
+    );
+  }
+
   return (
     <Workout
       db={db}
       userId={user.id}
       email={user.email}
+      guest={!!guestId}
       onSignOut={() => {
         clearPersonalData(user.id);
         forgetUser();

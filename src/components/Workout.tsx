@@ -238,11 +238,13 @@ export default function Workout({
   db,
   userId,
   email,
+  guest = false,
   onSignOut,
 }: {
   db: SupabaseClient;
   userId: string;
   email: string;
+  guest?: boolean;
   onSignOut: () => void;
 }) {
   const [unit, setUnit] = useState<Unit>("lb");
@@ -1631,6 +1633,7 @@ export default function Workout({
           db={db}
           userId={userId}
           email={email}
+          guest={guest}
           name={displayName}
           avatar={avatar}
           theme={theme}

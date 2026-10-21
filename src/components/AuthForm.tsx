@@ -16,6 +16,16 @@ export default function AuthForm({ db }: { db: SupabaseClient }) {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
+  // A private guest account with sample data (App fills it in), so visitors can try the app.
+  async function tryAsGuest() {
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    const { error: err } = await db.auth.signInAnonymously();
+    if (err) setError(err.message);
+    setBusy(false);
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -163,6 +173,24 @@ export default function AuthForm({ db }: { db: SupabaseClient }) {
       >
         {mode === "in" ? "New here? Create an account" : "Already have an account? Sign in"}
       </button>
+
+      {mode === "in" && (
+        <>
+          <div className="mt-2 flex items-center gap-3 text-xs font-bold uppercase tracking-wider text-muted" aria-hidden="true">
+            <span className="h-px flex-1 bg-field" />
+            or
+            <span className="h-px flex-1 bg-field" />
+          </div>
+          <button
+            type="button"
+            onClick={tryAsGuest}
+            disabled={busy}
+            className="mt-3 h-12 rounded-[14px] bg-field text-base font-bold disabled:opacity-60"
+          >
+            Look around as a guest
+          </button>
+        </>
+      )}
     </main>
   );
 }

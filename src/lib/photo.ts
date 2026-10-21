@@ -2,6 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const PHOTO_BUCKET = "equipment-photos";
 
+// Guest demo accounts cannot store photos (the storage policy refuses them too, see migration 0022).
+export const GUEST_NO_PHOTOS = "Photos aren't available in the guest demo.";
+
 // Shrink a phone photo (often 4+ MB) to a ~1200px JPEG before uploading it.
 export async function compressPhoto(file: File): Promise<Blob> {
   const bmp = await createImageBitmap(file);
@@ -22,6 +25,8 @@ export async function uploadPhoto(
   path: string,
   blob: Blob,
 ): Promise<{ url: string | null; error: string | null }> {
+  const { data } = await db.auth.getSession();
+  if (data.session?.user.is_anonymous) return { url: null, error: GUEST_NO_PHOTOS };
   const up = await db.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: "image/jpeg", upsert: true });
   if (up.error) return { url: null, error: up.error.message };
   const signed = await db.storage.from(PHOTO_BUCKET).createSignedUrl(path, 3600);

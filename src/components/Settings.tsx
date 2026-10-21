@@ -40,6 +40,7 @@ export default function Settings({
   db,
   userId,
   email,
+  guest = false,
   name,
   avatar,
   theme,
@@ -53,6 +54,7 @@ export default function Settings({
   db: SupabaseClient;
   userId: string;
   email: string;
+  guest?: boolean;
   name: string;
   avatar: string | null;
   theme: ThemeChoice;
@@ -88,6 +90,13 @@ export default function Settings({
   return (
     <div className="px-4 pb-8 pt-4">
       <h2 className="px-1 text-[32px] font-extrabold leading-tight tracking-tight">Settings</h2>
+
+      {guest && (
+        <p className="mt-4 rounded-[20px] bg-card p-5 text-sm font-medium shadow-sm">
+          You&apos;re looking around as a guest. This sample data is yours alone and is deleted after 7 days. Signing
+          out ends the demo.
+        </p>
+      )}
 
       <section className="mt-4 rounded-[20px] bg-card p-5 shadow-sm">
         <div className="flex items-center gap-4">
