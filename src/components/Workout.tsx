@@ -763,7 +763,7 @@ export default function Workout({
       key: newId(),
       name: p.name,
       exerciseId: p.exerciseId,
-      prevDate: plan.startedAt,
+      prevDate: plan.startedAt || null,
       setupId: p.setupId,
       kind: kindOf(plan.kind),
       singleArm: kindOf(plan.kind) === "strength" && (p.sets.some((s) => s.repsR != null) || !!catalog.find((c) => c.id === p.exerciseId)?.single_arm),
@@ -867,7 +867,8 @@ export default function Workout({
         name: day.title.replace(" (optional)", ""),
         kind,
         gymId: gymId || null,
-        startedAt: new Date().toISOString(),
+        startedAt: "", // not a past workout, so no "Last time" date
+
         exercises: found.map(({ pe, ...f }) => {
           const target = LIBRARY_BY_ID[pe.id]?.hold ? null : parseInt(pe.reps, 10) || null;
           return {
