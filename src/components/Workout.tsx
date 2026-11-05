@@ -31,6 +31,9 @@ import Settings, { type ThemeChoice } from "./Settings";
 import Avatar from "./Avatar";
 import { avatarKey, avatarPath, clearPending, compressAvatar, dataUrlToBlob, takePending } from "@/lib/avatar";
 import Progress from "./Progress";
+import MyPlan from "./MyPlan";
+import { LIBRARY_BY_ID } from "@/lib/exercise-library";
+import type { PlanDay } from "@/lib/plan";
 import Nutrition from "./Nutrition";
 import History, { type RepeatPlan } from "./History";
 import SetupPanel from "./SetupPanel";
@@ -277,7 +280,7 @@ export default function Workout({
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  const [view, setView] = useState<"home" | "log" | "history" | "gyms" | "progress" | "settings" | "nutrition">("home");
+  const [view, setView] = useState<"home" | "log" | "plan" | "history" | "gyms" | "progress" | "settings" | "nutrition">("home");
   const [displayName, setDisplayName] = useState(() => {
     try {
       return localStorage.getItem(`name:${userId}`) ?? "";
@@ -310,7 +313,7 @@ export default function Workout({
   // An empty workout counts as in progress from the moment Start workout is tapped.
   const [workoutStarted, setWorkoutStarted] = useState(false);
   // The Train sub-tab to come back to when the Train button is tapped.
-  const [trainTab, setTrainTab] = useState<"log" | "history" | "gyms" | "progress">("log");
+  const [trainTab, setTrainTab] = useState<"log" | "plan" | "history" | "gyms" | "progress">("log");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   // The "Ended at" step before saving: prefilled with now, editable if you forgot to finish.
   const [finishing, setFinishing] = useState(false);
@@ -748,8 +751,8 @@ export default function Workout({
   }
 
   // Start a new workout that copies a past one: same gym, exercises, order, setups and sets.
-  function repeatWorkout(plan: RepeatPlan) {
-    if (exercises.length > 0 && !window.confirm("This replaces the workout you are logging right now. Continue?")) {
+  function repeatWorkout(plan: RepeatPlan, confirmed = false) {
+    if (!confirmed && exercises.length > 0 && !window.confirm("This replaces the workout you are logging right now. Continue?")) {
       return;
     }
     // Rebuild superset pairs exactly: only a pair of two exercises sharing an id counts.
@@ -816,6 +819,71 @@ export default function Workout({
     setExercises(copied);
     setMessage({ kind: "ok", text: "Workout copied. Mark each set done as you go." });
     setView("log");
+  }
+
+  // My plan: open a planned day in the log. Library exercises the person doesn't have yet are
+  // added to their exercises (machines at the current gym), then the day is copied like a past
+  // workout with the plan's sets and the low end of its rep range as targets.
+  async function startPlanDay(day: PlanDay) {
+    if (exercises.length > 0 && !window.confirm("This replaces the workout you are logging right now. Continue?")) return;
+    const kind = day.kind === "optional" ? "cardio" : "strength";
+    const found: { exerciseId: string; name: string; pe: PlanDay["exercises"][number] }[] = [];
+    const made: Catalog[] = [];
+    for (const pe of day.exercises) {
+      const lib = LIBRARY_BY_ID[pe.id];
+      if (!lib) continue;
+      const machine = ["pin_machine", "plate_machine", "cable"].includes(lib.equipmentType);
+      const have = [...catalog, ...made].find(
+        (c) =>
+          !c.archived_at &&
+          c.name.trim().toLowerCase() === lib.name.toLowerCase() &&
+          (!machine || !c.gym_id || c.gym_id === gymId),
+      );
+      if (have) {
+        found.push({ exerciseId: have.id, name: have.name, pe });
+        continue;
+      }
+      const { data, error } = await db
+        .from("exercises")
+        .insert({
+          user_id: userId,
+          name: lib.name,
+          equipment_type: lib.equipmentType,
+          gym_id: machine ? gymId || null : null,
+          kind: lib.pattern === "walk" ? "cardio" : "strength",
+        })
+        .select("id,name,equipment_type,gym_id,photo_path,archived_at,kind,single_arm")
+        .single();
+      if (error || !data) {
+        setMessage({ kind: "error", text: explain(error?.message, "Could not set up the planned workout. Check your connection.") });
+        return;
+      }
+      made.push(data as Catalog);
+      found.push({ exerciseId: data.id, name: data.name, pe });
+    }
+    if (made.length) setCatalog((c) => [...c, ...made]);
+    repeatWorkout(
+      {
+        name: day.title.replace(" (optional)", ""),
+        kind,
+        gymId: gymId || null,
+        startedAt: new Date().toISOString(),
+        exercises: found.map(({ pe, ...f }) => {
+          const target = LIBRARY_BY_ID[pe.id]?.hold ? null : parseInt(pe.reps, 10) || null;
+          return {
+            exerciseId: f.exerciseId,
+            name: f.name,
+            setupId: null,
+            sets: Array.from({ length: pe.sets }, () =>
+              kind === "cardio" ? { kg: null, reps: null, durationS: 25 * 60 } : { kg: null, reps: target },
+            ),
+          };
+        }),
+      },
+      true,
+    );
+    setMessage({ kind: "ok", text: "Your planned workout is ready. Mark each set done as you go." });
+    setTrainTab("log");
   }
 
   // Begin an empty workout and open the log screen.
@@ -1545,9 +1613,9 @@ export default function Workout({
         </button>
       </div>
 
-      {(view === "log" || view === "history" || view === "gyms" || view === "progress") && (
+      {(view === "log" || view === "plan" || view === "history" || view === "gyms" || view === "progress") && (
         <div className="mx-4 mt-4 flex rounded-xl bg-line p-[3px]" role="group" aria-label="Train">
-          {(["log", "history", "gyms", "progress"] as const).map(
+          {(["log", "plan", "history", "gyms", "progress"] as const).map(
             (v) => (
               <button
                 key={v}
@@ -1557,11 +1625,11 @@ export default function Workout({
                   setTrainTab(v);
                 }}
                 aria-pressed={view === v}
-                className={`flex h-10 flex-1 items-center justify-center gap-1.5 rounded-[10px] text-sm font-bold ${
+                className={`flex h-10 flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-[10px] text-[13px] font-bold ${
                   view === v ? "bg-card text-ink" : "text-muted"
                 }`}
               >
-                {v === "log" ? "Workout" : v === "history" ? "History" : v === "gyms" ? "Gyms" : "Progress"}
+                {v === "log" ? "Workout" : v === "plan" ? "My plan" : v === "history" ? "History" : v === "gyms" ? "Gyms" : "Progress"}
                 {v === "log" && inProgress && <span aria-label="in progress" className="h-2 w-2 rounded-full bg-done" />}
               </button>
             ),
@@ -1651,6 +1719,7 @@ export default function Workout({
       {view === "history" && <History db={db} userId={userId} unit={unit} onRepeat={repeatWorkout} />}
 
       {view === "progress" && <Progress db={db} userId={userId} unit={unit} />}
+      {view === "plan" && <MyPlan db={db} userId={userId} onStartDay={startPlanDay} />}
 
       {view === "gyms" && (
         <Gyms
