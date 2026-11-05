@@ -2,7 +2,7 @@
 
 // Train > My plan (HCI proof of concept): a short questionnaire (F2) builds a weekly plan (F3) from
 // the exercise library with demo videos (F4) and the rest rules (F5). Exercises can be swapped and
-// the questionnaire retaken (F8) without touching logged workouts.
+// the questionnaire retaken (F8) without touching logged workouts. Goals (F7) are in GoalsCard.
 import { useEffect, useMemo, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { LIBRARY, LIBRARY_BY_ID, embedUrl, type Equipment, type LibraryExercise } from "@/lib/exercise-library";
@@ -19,6 +19,7 @@ import {
 } from "@/lib/plan";
 import { cacheKey, readCache, writeCache } from "@/lib/cache";
 import { explain } from "@/lib/net";
+import GoalsCard from "./GoalsCard";
 
 type Saved = { answers: Answers; plan: Plan };
 
@@ -308,6 +309,7 @@ export default function MyPlan({
             <li>· Start a planned day and it opens in the workout log</li>
           </ul>
         </div>
+        <GoalsCard db={db} userId={userId} suggested={3} />
       </section>
     );
   }
@@ -392,6 +394,8 @@ export default function MyPlan({
           </div>
         )
       )}
+
+      <GoalsCard db={db} userId={userId} suggested={answers.days} />
 
       {error && !open && (
         <p role="alert" className="mx-5 mt-3 text-sm font-semibold text-red-600">

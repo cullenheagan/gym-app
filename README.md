@@ -24,6 +24,7 @@ A workout and nutrition tracker that installs on your phone like an app and keep
 - Six questions build a weekly plan for your level, goal, schedule and equipment, from a library of 40 exercises with plain-language steps and demo videos.
 - Built-in rules give every week a rest day and never train the same muscles two days in a row. Automated tests check all 1,728 possible questionnaire answers.
 - Swap any exercise or retake the questions; start a planned day and it opens in the workout log.
+- A weekly workout goal shows this week's progress and your streak of weeks in a row, updated after every logged workout.
 
 **Nutrition**
 - Daily calories and macros against your targets, with separate targets for training days and rest days.
@@ -88,7 +89,7 @@ npm install
 npm run dev
 ```
 
-Run the plan tests with `npm test` (Node 22 or newer).
+Run the plan and goal tests with `npm test` (Node 22 or newer).
 
 Then open http://localhost:3000.
 
