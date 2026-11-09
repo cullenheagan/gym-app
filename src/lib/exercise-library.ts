@@ -66,7 +66,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Sit your hips back and down as if into a chair, keeping your chest up.",
       "Go as low as is comfortable with your heels on the floor, then stand back up.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=P-yaD24bUE8",
   },
   {
     id: "goblet-squat",
@@ -81,7 +81,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Squat down between your knees, keeping your elbows inside your knees and chest tall.",
       "Push through your whole foot to stand back up.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=6mf0oa2GGUc",
   },
   {
     id: "leg-press",
@@ -96,7 +96,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Release the safety handles and lower the platform until your knees are bent about 90 degrees.",
       "Press back up without locking your knees, then put the safeties back when you finish.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=8EMbB0tCn7Q",
   },
   {
     id: "barbell-back-squat",
@@ -111,7 +111,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Rest the bar on your upper back, step back, and stand with feet shoulder-width.",
       "Brace your stomach, squat down until your thighs are about level with the floor, and stand up.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=kRX2NfqM90g",
   },
   // Legs: hinge pattern
   {
@@ -127,7 +127,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Squeeze your glutes and lift your hips until your body is straight from knees to shoulders.",
       "Pause for a second at the top, then lower slowly.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=L9KZfxT654Y",
   },
   {
     id: "dumbbell-romanian-deadlift",
@@ -142,7 +142,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Push your hips back and slide the weights down your legs, keeping your back flat.",
       "Stop when you feel a stretch in the back of your legs, then drive your hips forward to stand.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=xAL7lHwj30E",
   },
   {
     id: "hip-thrust-machine",
@@ -157,7 +157,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Plant your feet flat and push through your heels to lift your hips level with your shoulders.",
       "Squeeze your glutes at the top and lower with control.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=pF17m_CXfL0",
   },
   {
     id: "barbell-romanian-deadlift",
@@ -172,7 +172,7 @@ export const LIBRARY: LibraryExercise[] = [
       "With knees slightly bent, push your hips back and lower the bar along your legs with a flat back.",
       "Stop below the knees or when your back starts to round, then stand tall.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=7j-2w4-P14I",
   },
   // Legs: one leg at a time
   {
@@ -188,7 +188,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Lower until both knees are bent about 90 degrees, back knee just above the floor.",
       "Push through the front foot to return, then switch legs.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=xrPteyQLGAo",
   },
   {
     id: "dumbbell-step-up",
@@ -203,7 +203,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Put one whole foot on the box and push through it to stand up on top.",
       "Step back down with control and repeat, then switch legs.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=9ZknEYboBOQ",
   },
   {
     id: "bulgarian-split-squat",
@@ -218,7 +218,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Lower straight down until your front thigh is about level with the floor.",
       "Push through the front foot to stand, finish the reps, then switch legs.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=Fmjj7wFJWRE",
   },
   // Legs: hamstring curl and calves
   {
@@ -234,7 +234,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Curl your heels toward your glutes without lifting your hips.",
       "Lower slowly until your legs are almost straight.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=vl5nUdE9mWM",
   },
   {
     id: "standing-calf-raise",
@@ -249,7 +249,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Rise up onto your toes as high as you can.",
       "Lower your heels slowly below the step for a stretch, then repeat.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=Km0QS46bTEA",
   },
   // Chest: horizontal push
   {
@@ -265,7 +265,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Keep your body in a straight line and lower your chest toward your hands.",
       "Push back up. The higher your hands, the easier it is.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=yAbg3_pJKvw",
   },
   {
     id: "push-up",
@@ -280,7 +280,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Lower your chest to just above the floor, elbows angled back, body straight.",
       "Push the floor away to come back up. Drop to your knees if you need to.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=WDIpL0pjun0",
   },
   {
     id: "dumbbell-floor-press",
@@ -295,7 +295,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Press the dumbbells up over your chest until your arms are straight.",
       "Lower until your elbows touch the floor, then press again.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=T0Y3OBF1bNI",
   },
   {
     id: "machine-chest-press",
@@ -310,7 +310,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Press the handles forward until your arms are straight but not locked.",
       "Let them come back slowly until you feel a stretch in your chest.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=sqNwDkUU_Ps",
   },
   {
     id: "dumbbell-bench-press",
@@ -325,7 +325,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Press the dumbbells up until your arms are straight over your chest.",
       "Lower them slowly to the sides of your chest and press again.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=M0tN99QgPyU",
   },
   {
     id: "barbell-bench-press",
@@ -340,7 +340,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Grip a little wider than shoulders, unrack, and lower the bar to your lower chest.",
       "Press it back up over your shoulders.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=SCVCLChPQFY",
   },
   // Shoulders: vertical push
   {
@@ -356,7 +356,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Press the weights overhead until your arms are straight.",
       "Lower them back to your shoulders with control.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=TsduLWuhlFM",
   },
   {
     id: "pike-push-up",
@@ -371,7 +371,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Bend your elbows to lower the top of your head toward the floor between your hands.",
       "Push back up to the V.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=XckEEwa1BPI",
   },
   {
     id: "machine-shoulder-press",
@@ -386,7 +386,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Press the handles overhead until your arms are almost straight.",
       "Lower slowly back to the start.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=GcY6TZxfS0k",
   },
   // Back: horizontal pull
   {
@@ -402,7 +402,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Lift your arms, chest and legs a few inches off the floor and squeeze your back.",
       "Hold for two seconds, then lower.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=g0Kr9Wd3CeQ",
   },
   {
     id: "one-arm-dumbbell-row",
@@ -417,7 +417,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Hold a dumbbell in the other hand and pull it up to your hip, elbow close to your side.",
       "Lower it until your arm is straight. Finish the reps, then switch sides.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=ZRSGpBUVcNw",
   },
   {
     id: "seated-cable-row",
@@ -432,7 +432,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Sit tall and pull the handle to your stomach, squeezing your shoulder blades together.",
       "Let your arms straighten slowly without rounding your back.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=lJoozxC0Rns",
   },
   {
     id: "doorframe-row",
@@ -447,7 +447,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Lean back with straight arms and a straight body.",
       "Pull your chest toward the frame by squeezing your shoulder blades, then lower back slowly.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=laxlC3wq6sU",
   },
   // Back: vertical pull
   {
@@ -463,7 +463,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Sweep your arms out and around in an arc until your hands meet overhead.",
       "Sweep them back to your sides, keeping them off the floor the whole time.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=447wYjo97nU",
   },
   {
     id: "prone-y-raise",
@@ -478,7 +478,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Lift your arms off the floor by squeezing your upper back, keeping your neck relaxed.",
       "Hold for a second at the top, then lower.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=w1AWGKubE5U",
   },
   {
     id: "lat-pulldown",
@@ -493,7 +493,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Lean back slightly and pull the bar to your upper chest, elbows down and back.",
       "Let the bar rise slowly until your arms are straight.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=AOpi-p0cJkc",
   },
   {
     id: "assisted-pull-up",
@@ -508,7 +508,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Pull yourself up until your chin is over the handles.",
       "Lower slowly until your arms are straight.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=wFj808u2HWU",
   },
   // Arms
   {
@@ -524,7 +524,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Curl the weights up toward your shoulders, keeping your elbows by your sides.",
       "Lower them slowly all the way down.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=ykJmrZ5v0Oo",
   },
   {
     id: "hammer-curl",
@@ -539,7 +539,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Curl the weights up, keeping your palms facing in and elbows still.",
       "Lower slowly.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=BRVDS6HVR9Q",
   },
   {
     id: "bench-dip",
@@ -554,7 +554,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Bend your elbows straight back to lower your hips a few inches.",
       "Press back up. Bend your knees more to make it easier.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=larQGD02ndE",
   },
   {
     id: "overhead-dumbbell-extension",
@@ -569,7 +569,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Bend your elbows to lower it behind your head, keeping elbows pointing up.",
       "Straighten your arms to lift it back up.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=-Vyt2QdsR7E",
   },
   {
     id: "cable-triceps-pushdown",
@@ -584,7 +584,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Push the handle down until your arms are straight.",
       "Let it come back up to about chest height without moving your elbows.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=LXkCrxn3caQ",
   },
   // Core
   {
@@ -600,7 +600,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Press your lower back into the floor, then slowly reach one arm back and the opposite leg out.",
       "Return and switch sides. Keep your lower back on the floor the whole time.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=o4GKiEoYClI",
   },
   {
     id: "plank",
@@ -616,7 +616,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Keep a straight line from head to heels; squeeze your stomach and glutes.",
       "Hold without letting your hips sag. Drop to your knees to make it easier.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=pvIjsG5Svck&t=2s",
   },
   {
     id: "bird-dog",
@@ -631,7 +631,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Reach one arm forward and the opposite leg back until both are straight.",
       "Hold for a second, return, and switch sides.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=ZdAHe9_HeEw",
   },
   {
     id: "side-plank",
@@ -647,7 +647,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Lift your hips so your body is straight from head to feet.",
       "Hold, then switch sides. Bend your knees to make it easier.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=44ND4bOB-T0",
   },
   // Optional easy day
   {
@@ -662,7 +662,7 @@ export const LIBRARY: LibraryExercise[] = [
       "Walk at a pace where you can talk but not sing, for 20 to 30 minutes.",
       "Keep it easy: this day helps you recover and builds the habit.",
     ],
-    video: null,
+    video: "https://www.youtube.com/watch?v=nmvVfgrExAg",
   },
 ];
 
