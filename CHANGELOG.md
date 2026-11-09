@@ -2,6 +2,9 @@
 
 Newest first. Each entry says what changed and why. Mirrored in the Notion "Gym App" wiki.
 
+## 2026-11-09
+- My plan is now its own beginner app instead of a Train tab: the sign-in screen has a second button under "Look around as a guest", "New to the gym? Get a plan". It signs in with a private anonymous account marked as a beginner (no sample data, no email needed) and opens only the My plan screen, starting straight with the 6 questions. The screen keeps the week, exercise videos, swap, goals and Retake questions, and replaces Start with a simple checklist: tick each exercise if you like, then "Mark today done" (or "Mark this workout done" for another day) saves the workout, shows "Done today ✓" and updates the weekly goal straight away. That makes logging a workout three taps or fewer from opening the app (HCI proposal goal). Exit (tap twice: "exiting deletes your plan from this phone") signs out. Train is back to Workout, History, Gyms and Progress, exactly as before My plan. Migration 0025 changes the daily cleanup so beginner accounts are kept while used and deleted after 30 days without use; guest demo accounts are still deleted after 7 days. No tables changed and no existing data touched.
+
 ## 2026-11-08
 - Demo videos for all 40 My plan exercises (HCI proposal F4), chosen by Cullen's team from beginner tutorials (PureGym, NASM, Runna and others). Every exercise sheet now plays its video and the exercise lists show its thumbnail instead of "Video coming soon". All 40 links were checked to exist and allow embedding, and the npm test coverage check now passes (no exercises missing a video). docs/exercise-videos.md holds the list. No database change.
 

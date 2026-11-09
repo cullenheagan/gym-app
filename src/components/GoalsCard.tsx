@@ -16,10 +16,12 @@ export default function GoalsCard({
   db,
   userId,
   suggested,
+  version = 0,
 }: {
   db: SupabaseClient;
   userId: string;
   suggested: number; // the plan's days per week, used as the starting number
+  version?: number; // bump to reload after a workout is marked done
 }) {
   const ck = cacheKey(userId, "goals");
   const [data, setData] = useState<Cached | null>(() => readCache<Cached>(ck));
@@ -49,7 +51,7 @@ export default function GoalsCard({
 
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, version]);
 
   const goals = data?.goals ?? [];
   const current = activeGoal(goals);

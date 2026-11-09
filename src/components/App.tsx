@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import AuthForm from "./AuthForm";
 import { clearPersonalData } from "@/lib/cache";
 import Workout from "./Workout";
+import MyPlan from "./MyPlan";
 
 type KnownUser = { id: string; email: string };
 const LAST_USER = "lastUser";
@@ -43,7 +44,11 @@ export default function App() {
   // Guest demo: the guest's own account is filled with sample data once, before the app opens.
   const [seeded, setSeeded] = useState<string | null>(null);
   const [seedError, setSeedError] = useState<string | null>(null);
-  const guestId = session?.user.is_anonymous ? session.user.id : null;
+  // "New to the gym? Get a plan" signs in anonymously with mode "beginner": that account only sees
+  // the beginner screen (My plan) and gets no sample data. Other anonymous accounts are the demo.
+  const anonymous = !!session?.user.is_anonymous;
+  const beginner = anonymous && session?.user.user_metadata?.mode === "beginner";
+  const guestId = anonymous && !beginner ? session!.user.id : null;
 
   useEffect(() => {
     if (!supabase || !guestId || seeded === guestId) return;
@@ -113,6 +118,21 @@ export default function App() {
 
   if (!user) {
     return <AuthForm db={db} />;
+  }
+
+  if (beginner) {
+    return (
+      <MyPlan
+        db={db}
+        userId={user.id}
+        onExit={() => {
+          clearPersonalData(user.id);
+          forgetUser();
+          setFallback(null);
+          db.auth.signOut();
+        }}
+      />
+    );
   }
 
   if (guestId && seeded !== guestId) {

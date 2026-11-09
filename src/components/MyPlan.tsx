@@ -1,9 +1,12 @@
 "use client";
 
-// Train > My plan (HCI proof of concept): a short questionnaire (F2) builds a weekly plan (F3) from
+// The beginner screen (HCI proof of concept), opened from "New to the gym? Get a plan" on the
+// sign-in screen with its own anonymous account. A short questionnaire (F2) builds a weekly plan (F3) from
 // the exercise library with demo videos (F4) and the rest rules (F5). Exercises can be swapped and
 // the questionnaire retaken (F8) without touching logged workouts. Goals (F7) are in GoalsCard.
-import { useEffect, useMemo, useState } from "react";
+// Logging is a simple checklist: tick exercises if you like, then Mark today done saves a workout
+// (no sets), which is what the weekly goal counts. Three taps or fewer from opening the app.
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { LIBRARY, LIBRARY_BY_ID, embedUrl, type Equipment, type LibraryExercise } from "@/lib/exercise-library";
 import {
@@ -131,11 +134,11 @@ function youtubeId(video: string | null): string | null {
 export default function MyPlan({
   db,
   userId,
-  onStartDay,
+  onExit,
 }: {
   db: SupabaseClient;
   userId: string;
-  onStartDay: (day: PlanDay) => void;
+  onExit: () => void;
 }) {
   const ck = cacheKey(userId, "plan");
   const [saved, setSaved] = useState<Saved | null>(() => readCache<Saved>(ck));
@@ -147,6 +150,31 @@ export default function MyPlan({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const today = weekdayIndex(new Date());
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const [doneToday, setDoneToday] = useState<string[]>([]); // names of workouts already marked done today
+  const [goalsVersion, setGoalsVersion] = useState(0);
+  const [confirmExit, setConfirmExit] = useState(false);
+  const autoStarted = useRef(false);
+
+  // Workouts already marked done today, so the button can say so.
+  useEffect(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    db.from("workouts")
+      .select("name")
+      .eq("user_id", userId)
+      .gte("started_at", start.toISOString())
+      .then(({ data }) => setDoneToday((data ?? []).map((r) => r.name as string)));
+  }, [db, userId, goalsVersion]);
+
+  // A new beginner goes straight into the questions.
+  useEffect(() => {
+    if (loaded && !saved && step === null && !autoStarted.current) {
+      autoStarted.current = true;
+      setDraft({});
+      setStep(0);
+    }
+  }, [loaded, saved, step]);
 
   useEffect(() => {
     let cancelled = false;
@@ -220,12 +248,42 @@ export default function MyPlan({
     await save({ ...saved, plan });
   }
 
+  async function markDone(title: string, kind: "workout" | "optional" | "rest") {
+    setBusy(true);
+    setError(null);
+    const now = new Date();
+    const { error: err } = await db.from("workouts").insert({
+      user_id: userId,
+      name: title.replace(" (optional)", ""),
+      kind: kind === "optional" ? "cardio" : "strength",
+      started_at: new Date(now.getTime() - 45 * 60 * 1000).toISOString(),
+      ended_at: now.toISOString(),
+    });
+    setBusy(false);
+    if (err) {
+      setError(explain(err.message, "Could not save. Check your connection and try again."));
+      return;
+    }
+    setTicked(new Set());
+    setGoalsVersion((v) => v + 1);
+  }
+
+  const exitButton = (
+    <button
+      type="button"
+      onClick={() => (confirmExit ? onExit() : setConfirmExit(true))}
+      className="h-11 text-sm font-extrabold text-muted"
+    >
+      {confirmExit ? "Tap again: exiting deletes your plan from this phone" : "Exit"}
+    </button>
+  );
+
   // Questionnaire
   if (step !== null) {
     const q = QUESTIONS[step];
     const picked = draft[q.key];
     return (
-      <section className="px-4 pb-32 pt-2">
+      <section className="mx-auto max-w-md px-4 pb-12 pt-4">
         <div className="flex items-center justify-between px-1">
           <button
             type="button"
@@ -283,7 +341,7 @@ export default function MyPlan({
   // No plan yet
   if (!saved) {
     return (
-      <section className="pb-32">
+      <section className="mx-auto max-w-md pb-12 pt-4">
         <h2 className="mt-4 px-5 text-[32px] font-extrabold leading-tight tracking-tight">My plan</h2>
         <p className="px-5 text-sm font-semibold text-muted">A weekly routine made for you, with a video for every exercise.</p>
         <div className="mx-4 mt-4 rounded-[20px] bg-card p-5 shadow-sm">
@@ -306,10 +364,10 @@ export default function MyPlan({
             <li>· Muscles get a day off before they&apos;re trained again</li>
             <li>· At least one full rest day every week</li>
             <li>· Tap any exercise to see a video and the steps</li>
-            <li>· Start a planned day and it opens in the workout log</li>
+            <li>· Tick off each exercise, then mark the day done</li>
           </ul>
         </div>
-        <GoalsCard db={db} userId={userId} suggested={3} />
+        <div className="mt-2 flex justify-center">{exitButton}</div>
       </section>
     );
   }
@@ -319,7 +377,7 @@ export default function MyPlan({
   const day = plan.days[selected];
   const sheet = open ? plan.days[open.weekday]?.exercises[open.index] : undefined;
   return (
-    <section className="pb-32">
+    <section className="mx-auto max-w-md pb-12 pt-4">
       <h2 className="mt-4 px-5 text-[32px] font-extrabold leading-tight tracking-tight">My plan</h2>
       <p className="px-5 text-sm font-semibold text-muted">
         {LEVEL_LABEL[plan.level]} · {GOAL_LABEL[answers.goal]} · {answers.days} days · {EQUIPMENT_LABEL[answers.equipment]}
@@ -380,22 +438,45 @@ export default function MyPlan({
               {selected === today ? "Today" : WEEKDAYS[selected]}: {day.title}
             </p>
             <ul className="mt-1">
-              {day.exercises.map((e, i) => (
-                <ExerciseRow key={`${e.id}-${i}`} ex={e} onOpen={() => setOpen({ weekday: day.weekday, index: i })} />
-              ))}
+              {day.exercises.map((e, i) => {
+                const key = `${day.weekday}-${i}`;
+                return (
+                  <ExerciseRow
+                    key={`${e.id}-${i}`}
+                    ex={e}
+                    ticked={ticked.has(key)}
+                    onTick={() =>
+                      setTicked((t) => {
+                        const n = new Set(t);
+                        if (n.has(key)) n.delete(key);
+                        else n.add(key);
+                        return n;
+                      })
+                    }
+                    onOpen={() => setOpen({ weekday: day.weekday, index: i })}
+                  />
+                );
+              })}
             </ul>
-            <button
-              type="button"
-              onClick={() => onStartDay(day)}
-              className="mt-3 h-[50px] w-full rounded-[14px] bg-accent text-base font-extrabold text-[var(--on-accent)]"
-            >
-              {selected === today ? "Start today's workout" : "Start this workout"}
-            </button>
+            {doneToday.includes(day.title.replace(" (optional)", "")) ? (
+              <p className="mt-3 flex h-[50px] items-center justify-center rounded-[14px] bg-field text-base font-extrabold text-done">
+                Done today ✓
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={() => markDone(day.title, day.kind)}
+                disabled={busy}
+                className="mt-3 h-[50px] w-full rounded-[14px] bg-accent text-base font-extrabold text-[var(--on-accent)] disabled:opacity-60"
+              >
+                {selected === today ? "Mark today done" : "Mark this workout done"}
+              </button>
+            )}
           </div>
         )
       )}
 
-      <GoalsCard db={db} userId={userId} suggested={answers.days} />
+      <GoalsCard db={db} userId={userId} suggested={answers.days} version={goalsVersion} />
 
       {error && !open && (
         <p role="alert" className="mx-5 mt-3 text-sm font-semibold text-red-600">
@@ -403,10 +484,11 @@ export default function MyPlan({
         </p>
       )}
 
-      <div className="mt-4 flex justify-center">
+      <div className="mt-4 flex items-center justify-center gap-5">
         <button type="button" onClick={begin} className="h-11 text-sm font-extrabold text-accent">
           Retake questions
         </button>
+        {exitButton}
       </div>
 
       {open && sheet && (
@@ -438,11 +520,37 @@ function Thumb({ lib }: { lib: LibraryExercise | undefined }) {
   );
 }
 
-function ExerciseRow({ ex, onOpen }: { ex: PlanExercise; onOpen: () => void }) {
+function ExerciseRow({
+  ex,
+  ticked,
+  onTick,
+  onOpen,
+}: {
+  ex: PlanExercise;
+  ticked: boolean;
+  onTick: () => void;
+  onOpen: () => void;
+}) {
   const lib = LIBRARY_BY_ID[ex.id];
   return (
-    <li className="border-t border-line first:border-t-0">
-      <button type="button" onClick={onOpen} className="flex w-full items-center gap-3 py-2.5 text-left">
+    <li className="flex items-center gap-2 border-t border-line first:border-t-0">
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={ticked}
+        aria-label={`Done: ${lib?.name ?? ex.id}`}
+        onClick={onTick}
+        className="grid h-11 w-9 shrink-0 place-items-center"
+      >
+        <span
+          className={`grid h-6 w-6 place-items-center rounded-md border-2 text-sm font-extrabold ${
+            ticked ? "border-done bg-done text-white" : "border-line"
+          }`}
+        >
+          {ticked ? "✓" : ""}
+        </span>
+      </button>
+      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 py-2.5 text-left">
         <Thumb lib={lib} />
         <span className="flex-1 text-sm font-extrabold">
           {lib?.name ?? ex.id}

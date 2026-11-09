@@ -20,10 +20,11 @@ A workout and nutrition tracker that installs on your phone like an app and keep
 - Progress charts per exercise (estimated 1RM, top weight, volume), personal bests, a bodyweight trend, and a training calendar with streaks.
 - History with filters, repeat-a-past-workout, and CSV export of every set.
 
-**My plan**
+**My plan (beginner mode)**
+- Tap "New to the gym? Get a plan" on the sign-in screen: no sign-up, just a separate beginner screen.
 - Six questions build a weekly plan for your level, goal, schedule and equipment, from a library of 40 exercises with plain-language steps and demo videos.
 - Built-in rules give every week a rest day and never train the same muscles two days in a row. Automated tests check all 1,728 possible questionnaire answers.
-- Swap any exercise or retake the questions; start a planned day and it opens in the workout log.
+- Swap any exercise or retake the questions; tick off exercises and mark the day done in three taps or fewer.
 - A weekly workout goal shows this week's progress and your streak of weeks in a row, updated after every logged workout.
 
 **Nutrition**

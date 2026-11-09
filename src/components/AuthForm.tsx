@@ -17,11 +17,12 @@ export default function AuthForm({ db }: { db: SupabaseClient }) {
   const [info, setInfo] = useState<string | null>(null);
 
   // A private guest account with sample data (App fills it in), so visitors can try the app.
-  async function tryAsGuest() {
+  // mode "beginner" opens only the beginner screen (My plan); no mode is the guest demo.
+  async function tryAsGuest(mode?: "beginner") {
     setBusy(true);
     setError(null);
     setInfo(null);
-    const { error: err } = await db.auth.signInAnonymously();
+    const { error: err } = await db.auth.signInAnonymously(mode ? { options: { data: { mode } } } : undefined);
     if (err) setError(err.message);
     setBusy(false);
   }
@@ -183,11 +184,19 @@ export default function AuthForm({ db }: { db: SupabaseClient }) {
           </div>
           <button
             type="button"
-            onClick={tryAsGuest}
+            onClick={() => tryAsGuest()}
             disabled={busy}
             className="mt-3 h-12 rounded-[14px] bg-field text-base font-bold disabled:opacity-60"
           >
             Look around as a guest
+          </button>
+          <button
+            type="button"
+            onClick={() => tryAsGuest("beginner")}
+            disabled={busy}
+            className="mt-2.5 h-12 rounded-[14px] bg-field text-base font-bold disabled:opacity-60"
+          >
+            New to the gym? Get a plan
           </button>
         </>
       )}
